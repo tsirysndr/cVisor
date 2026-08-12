@@ -46,10 +46,10 @@ Python SDK and CLI are also planned.
 ## Examples
 
 Here are a selection of full examples which currently work in cVisor:
-- [Hello World](src/sdks/node/examples/hello-world.ts) - Run your first command in the sandbox
-- [Running Python](src/sdks/node/examples/python-hello.ts) - Write and execute a Python script 
-- [Testing Sandbox Boundaries](src/sdks/node/examples/sandbox-boundaries.ts) - See how the sandbox handles host fingerprinting, blocked paths, and filesystem isolation
-- [Filesystem Operations](src/sdks/node/examples/nested-dirs.ts) - Demonstrate directory creation, file operations, running scripts
+- [Hello World](sdks/node/examples/hello-world.ts) - Run your first command in the sandbox
+- [Running Python](sdks/node/examples/python-hello.ts) - Write and execute a Python script 
+- [Testing Sandbox Boundaries](sdks/node/examples/sandbox-boundaries.ts) - See how the sandbox handles host fingerprinting, blocked paths, and filesystem isolation
+- [Filesystem Operations](sdks/node/examples/nested-dirs.ts) - Demonstrate directory creation, file operations, running scripts
 
 ## Architecture
 
@@ -172,4 +172,4 @@ returning ENOSYS:
 cargo build -p cvisor-core --features fail-loudly
 ```
 
-See `src/sdks/README.md` for the language SDKs (Node, Bun, Deno, Python, Ruby, Erlang).
+See `sdks/README.md` for the language SDKs (Node, Bun, Deno, Python, Ruby, Erlang).
