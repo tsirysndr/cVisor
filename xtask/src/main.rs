@@ -121,7 +121,7 @@ fn build_node_one(target: &str, platform_dir: &str) -> bool {
         eprintln!("expected {so} to exist");
         return false;
     }
-    let dest = format!("src/sdks/node/platforms/{platform_dir}/libcvisor.node");
+    let dest = format!("sdks/node/platforms/{platform_dir}/libcvisor.node");
     match std::fs::copy(&so, &dest) {
         Ok(_) => {
             eprintln!("+ copied {so} -> {dest}");
@@ -157,7 +157,7 @@ fn cmd_run_node(args: &[String]) -> bool {
     if !build_node_one(target, dir) {
         return false;
     }
-    if !run(Command::new("docker").args(["build", "-t", "cvisor-node-test", "./src/sdks/node"])) {
+    if !run(Command::new("docker").args(["build", "-t", "cvisor-node-test", "./sdks/node"])) {
         return false;
     }
     let script = args
@@ -172,7 +172,7 @@ fn cmd_run_node(args: &[String]) -> bool {
         "--security-opt",
         "seccomp=unconfined",
         "-v",
-        "./src/sdks/node:/app",
+        "./sdks/node:/app",
         "-w",
         "/app",
         "cvisor-node-test",
@@ -230,11 +230,11 @@ fn cmd_ffi(args: &[String]) -> bool {
     }
     // Distribute the .so to each FFI SDK's native directory.
     let dests = [
-        format!("src/sdks/python/cvisor/_native/libcvisor-{arch}.so"),
-        format!("src/sdks/bun/native/libcvisor-{arch}.so"),
-        format!("src/sdks/deno/native/libcvisor-{arch}.so"),
-        format!("src/sdks/ruby/native/libcvisor-{arch}.so"),
-        format!("src/sdks/erlang/priv/libcvisor-{arch}.so"),
+        format!("sdks/python/cvisor/_native/libcvisor-{arch}.so"),
+        format!("sdks/bun/native/libcvisor-{arch}.so"),
+        format!("sdks/deno/native/libcvisor-{arch}.so"),
+        format!("sdks/ruby/native/libcvisor-{arch}.so"),
+        format!("sdks/erlang/priv/libcvisor-{arch}.so"),
     ];
     for dest in dests {
         let p = std::path::Path::new(&dest);

@@ -1,0 +1,36 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Interactive cVisor console.
+#
+# Drops you into an IRB session with a live sandbox ready to use:
+#
+#   sb          -> a Cvisor::Sandbox instance
+#   sh("ls /")  -> run a shell command in the sandbox, printing stdout/stderr
+#   Cvisor::Sandbox.new -> create your own
+#
+# Run with `bin/console` (or `bundle exec console`).
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+
+require "cvisor"
+require "irb"
+
+sb = Cvisor::Sandbox.new
+
+# Top-level `sh` helper that runs a command in `sb` and prints its output.
+define_singleton_method(:sh) do |command|
+  out = sb.run(command)
+  $stdout.print(out.stdout)
+  $stderr.print(out.stderr)
+  out
+end
+
+puts <<~BANNER
+  cVisor interactive console
+    sb          -> a Sandbox instance
+    sh("cmd")   -> run a shell command in the sandbox, printing stdout/stderr
+    Cvisor::Sandbox.new -> create your own
+BANNER
+
+binding.irb

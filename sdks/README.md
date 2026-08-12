@@ -61,3 +61,13 @@ puts Cvisor::Sandbox.new.run("echo hi").stdout
 %% Erlang
 {ok, Out, _Err} = cvisor:run(<<"echo hi">>).
 ```
+
+## Interactive consoles
+
+The Python and Ruby SDKs ship a REPL with a live sandbox (`sb`) and an
+`sh("cmd")` helper preloaded:
+
+```bash
+uv run --extra console cvisor    # Python  -> IPython
+bin/console                       # Ruby    -> IRB (from sdks/ruby)
+```

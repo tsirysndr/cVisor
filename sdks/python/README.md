@@ -22,6 +22,27 @@ with Sandbox() as sb:
 `Sandbox.run(cmd)` blocks until the sandboxed command exits and returns an
 `Output` with `.stdout` / `.stderr` (str) and `.stdout_bytes` / `.stderr_bytes`.
 
+## Interactive console
+
+Launch an IPython REPL with a live sandbox preloaded:
+
+```bash
+uv run --extra console cvisor   # or: python -m cvisor
+```
+
+```
+cVisor interactive console
+  sb          -> a Sandbox instance
+  sh("cmd")   -> run a shell command in the sandbox, printing stdout/stderr
+  Sandbox     -> create your own: Sandbox()
+
+In [1]: sh("echo hello; uname -n")
+hello
+cvisor
+```
+
+Without the `console` extra (IPython) it falls back to the stdlib REPL.
+
 ## Development
 
 The SDK loads `libcvisor.so`. Build it from the repo root and point the SDK at
@@ -33,6 +54,6 @@ bundled under `cvisor/_native/`:
 cargo xtask ffi
 
 # run the tests with uv
-cd src/sdks/python
+cd sdks/python
 uv run pytest
 ```

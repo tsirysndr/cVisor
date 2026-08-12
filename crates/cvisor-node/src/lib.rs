@@ -1,6 +1,6 @@
 //! N-API bindings for the Node SDK.
 //!
-//! Matches the frozen FFI contract in `src/sdks/node/src/native.ts` exactly, so
+//! Matches the frozen FFI contract in `sdks/node/src/native.ts` exactly, so
 //! the hand-written TypeScript loader and platform packages need no changes:
 //!   createSandbox() -> External<Sandbox>
 //!   sandboxSetLogLevel(sb, "OFF"|"DEBUG")

@@ -3,7 +3,7 @@
 ## Layout
 
 ```
-src/sdks/node/
+sdks/node/
   index.ts              # Package entry point, re-exports Sandbox
   src/
     native.ts        # FFI contract: NativeModule interface, platform check, require()

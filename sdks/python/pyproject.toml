@@ -15,6 +15,15 @@ classifiers = [
 # Pure-ctypes wrapper — no runtime dependencies.
 dependencies = []
 
+[project.optional-dependencies]
+# Rich interactive console (`cvisor`). Without it the console falls back to the
+# stdlib REPL.
+console = ["ipython>=8"]
+
+[project.scripts]
+# `cvisor` (or `python -m cvisor`) launches the interactive console.
+cvisor = "cvisor.console:main"
+
 [project.urls]
 Homepage = "https://github.com/butter-dot-dev/cVisor"
 Repository = "https://github.com/butter-dot-dev/cVisor"

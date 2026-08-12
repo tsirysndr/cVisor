@@ -46,7 +46,7 @@ cargo test -p cvisor-core                              # pure-logic tests on the
 cargo xtask test [--arch aarch64|x86_64]              # full unit+e2e suite in Alpine (Docker, musl)
 cargo xtask run                                        # run the sandbox binary in Alpine
 cargo xtask ffi [--arch ...]                           # build libcvisor.so, patchelf, distribute to SDKs
-cargo xtask run-node                                   # build .node + run src/sdks/node/test.ts in bun
+cargo xtask run-node                                   # build .node + run sdks/node/test.ts in bun
 cargo xtask node-artifacts                             # build libcvisor.node for all 4 platforms
 ```
 
@@ -85,7 +85,7 @@ double-close from `FdTable.clone` sharing a raw fd (now dup-on-clone).
 
 ## SDKs
 
-See `src/sdks/README.md`. Node uses napi (`libcvisor.node`); Bun, Deno, Python
+See `sdks/README.md`. Node uses napi (`libcvisor.node`); Bun, Deno, Python
 (uv), Ruby (fiddle), and Erlang (NIF) all wrap the shared `libcvisor.so` C ABI.
 
 
