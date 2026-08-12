@@ -37,7 +37,15 @@ init() ->
                 Dir
         end,
     ensure_lib_env(PrivDir),
-    erlang:load_nif(filename:join(PrivDir, ?LIBNAME), 0).
+    case erlang:load_nif(filename:join(PrivDir, ?LIBNAME), 0) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            %% Keep the module loadable without the NIF (e.g. ex_doc builds on
+            %% non-Linux hosts); calls then raise nif_not_loaded.
+            logger:warning("cvisor: NIF not loaded: ~p", [Reason]),
+            ok
+    end.
 
 %% Point the NIF at the bundled libcvisor-<arch>.so unless the caller already
 %% chose a library via CVISOR_LIB. The NIF reads the variable when it dlopens.
