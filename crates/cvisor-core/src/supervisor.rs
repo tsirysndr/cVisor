@@ -293,7 +293,10 @@ impl Supervisor {
         } else if Some(nr) == legacy::RMDIR {
             // rmdir(path) -> unlinkat(AT_FDCWD, path, AT_REMOVEDIR)
             let a = notif.data.args;
-            self.sys_unlinkat(&remap(notif, [AT_FDCWD_U64, a[0], libc::AT_REMOVEDIR as u64, 0, 0, 0]))
+            self.sys_unlinkat(&remap(
+                notif,
+                [AT_FDCWD_U64, a[0], libc::AT_REMOVEDIR as u64, 0, 0, 0],
+            ))
         } else if Some(nr) == legacy::UNLINK {
             // unlink(path) -> unlinkat(AT_FDCWD, path, 0)
             let a = notif.data.args;
