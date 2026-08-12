@@ -186,7 +186,9 @@ impl Threads {
         child_tid: AbsTid,
         flags: CloneFlags,
     ) -> Result<(), ThreadError> {
-        flags.check_supported().map_err(|_| ThreadError::Unsupported)?;
+        flags
+            .check_supported()
+            .map_err(|_| ThreadError::Unsupported)?;
         let parent = self.map.get(&parent_tid).ok_or(ThreadError::NotFound)?;
         let (p_fdt, p_fsi, p_tgid) = (parent.fd_table_id, parent.fs_info_id, parent.tgid);
 
@@ -318,14 +320,26 @@ impl Threads {
     fn new_fd_table(&mut self, table: FdTable) -> FdTableId {
         let id = self.next_fdt;
         self.next_fdt += 1;
-        self.fd_tables.insert(id, Slot { value: table, refs: 1 });
+        self.fd_tables.insert(
+            id,
+            Slot {
+                value: table,
+                refs: 1,
+            },
+        );
         id
     }
 
     fn new_fs_info(&mut self, info: FsInfo) -> FsInfoId {
         let id = self.next_fsi;
         self.next_fsi += 1;
-        self.fs_infos.insert(id, Slot { value: info, refs: 1 });
+        self.fs_infos.insert(
+            id,
+            Slot {
+                value: info,
+                refs: 1,
+            },
+        );
         id
     }
 
@@ -400,7 +414,8 @@ mod tests {
     #[test]
     fn clone_files_shares_fd_table() {
         let mut t = Threads::new(100);
-        t.register_child(100, 200, CloneFlags(clone::FILES)).unwrap();
+        t.register_child(100, 200, CloneFlags(clone::FILES))
+            .unwrap();
         assert_eq!(
             t.get(100).unwrap().fd_table_id,
             t.get(200).unwrap().fd_table_id
@@ -411,7 +426,8 @@ mod tests {
     #[test]
     fn clone_thread_shares_group_and_tables() {
         let mut t = Threads::new(100);
-        t.register_child(100, 201, CloneFlags(clone::THREAD)).unwrap();
+        t.register_child(100, 201, CloneFlags(clone::THREAD))
+            .unwrap();
         // Same thread group (tgid) as the leader.
         assert_eq!(t.ns_pid(201), Some(100));
         assert_eq!(
@@ -457,7 +473,8 @@ mod tests {
         let mut t = Threads::new(100);
         // Two threads in group 200.
         t.register_child(100, 200, CloneFlags(0)).unwrap();
-        t.register_child(200, 201, CloneFlags(clone::THREAD)).unwrap();
+        t.register_child(200, 201, CloneFlags(clone::THREAD))
+            .unwrap();
         assert_eq!(t.count(), 3);
         t.handle_group_exit(200);
         assert!(!t.contains(200));
@@ -468,7 +485,8 @@ mod tests {
     #[test]
     fn fd_table_freed_on_last_exit() {
         let mut t = Threads::new(100);
-        t.register_child(100, 200, CloneFlags(clone::FILES)).unwrap();
+        t.register_child(100, 200, CloneFlags(clone::FILES))
+            .unwrap();
         assert_eq!(t.fd_table_refs(100), 2);
         t.handle_thread_exit(200);
         assert_eq!(t.fd_table_refs(100), 1);

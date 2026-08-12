@@ -102,7 +102,10 @@ fn blocked_syscall_fails_in_sandbox() {
     // `chroot` is blocked (ENOSYS); busybox chroot reports the failure on
     // stderr and the shell reports non-empty output rather than succeeding.
     let (out, err) = run("chroot /tmp /bin/true 2>&1; echo done");
-    assert!(out.contains("done"), "command should have run: {out:?} {err:?}");
+    assert!(
+        out.contains("done"),
+        "command should have run: {out:?} {err:?}"
+    );
     // chroot must not have succeeded silently — some error text is present.
     assert!(out.len() > "done\n".len() || !err.is_empty());
 }
@@ -126,21 +129,17 @@ fn mkdir_then_list_in_tmp() {
 fn stat_and_test_existence_in_tmp() {
     // `test -f` uses newfstatat/faccessat; a created file must be seen, a
     // missing one must not.
-    let (out, _err) = run(
-        "echo x > /tmp/exists.txt; \
+    let (out, _err) = run("echo x > /tmp/exists.txt; \
          if [ -f /tmp/exists.txt ]; then echo yes; else echo no; fi; \
-         if [ -e /tmp/missing.txt ]; then echo yes2; else echo no2; fi",
-    );
+         if [ -e /tmp/missing.txt ]; then echo yes2; else echo no2; fi");
     assert_eq!(out, "yes\nno2\n");
 }
 
 #[test]
 fn rm_tombstones_file_in_tmp() {
     // unlinkat removes a tmp file; a subsequent existence check must fail.
-    let (out, _err) = run(
-        "echo x > /tmp/gone.txt; rm /tmp/gone.txt; \
-         if [ -e /tmp/gone.txt ]; then echo present; else echo removed; fi",
-    );
+    let (out, _err) = run("echo x > /tmp/gone.txt; rm /tmp/gone.txt; \
+         if [ -e /tmp/gone.txt ]; then echo present; else echo removed; fi");
     assert_eq!(out, "removed\n");
 }
 
@@ -175,10 +174,8 @@ fn cd_changes_working_directory() {
 fn chmod_and_touch_in_tmp() {
     // touch creates a file (utimensat/openat), chmod changes its mode
     // (fchmodat), and the executable bit is then observable via `test -x`.
-    let (out, _err) = run(
-        "touch /tmp/script.sh; chmod +x /tmp/script.sh; \
-         if [ -x /tmp/script.sh ]; then echo executable; else echo not; fi",
-    );
+    let (out, _err) = run("touch /tmp/script.sh; chmod +x /tmp/script.sh; \
+         if [ -x /tmp/script.sh ]; then echo executable; else echo not; fi");
     assert_eq!(out, "executable\n");
 }
 

@@ -11,7 +11,13 @@ shift
 bin_dir="$(cd "$(dirname "$bin")" && pwd)"
 bin_name="$(basename "$bin")"
 
-exec docker run --rm --security-opt seccomp=unconfined \
+# seccomp=unconfined: the sandbox installs its own seccomp filter.
+# apparmor=unconfined: the supervisor uses ptrace-class ops (pidfd_getfd,
+#   process_vm_readv) against the guest, which the docker-default AppArmor
+#   profile can restrict on real Linux hosts (e.g. GitHub Actions).
+exec docker run --rm \
+    --security-opt seccomp=unconfined \
+    --security-opt apparmor=unconfined \
     --platform linux/amd64 \
     -v "$bin_dir:/t" \
     alpine "/t/$bin_name" "$@"

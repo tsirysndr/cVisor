@@ -16,9 +16,8 @@ pub struct IoctlNotifier {
 
 impl Notifier for IoctlNotifier {
     fn addfd(&self, id: u64, srcfd: RawFd, newfd: RawFd, cloexec: bool) -> SysResult<()> {
-        super::notif::addfd(self.notify_fd, id, srcfd, newfd, cloexec).map_err(|e| {
-            SysError(Errno::from_raw(e as i32).unwrap_or(Errno::IO))
-        })
+        super::notif::addfd(self.notify_fd, id, srcfd, newfd, cloexec)
+            .map_err(|e| SysError(Errno::from_raw(e as i32).unwrap_or(Errno::IO)))
     }
 }
 

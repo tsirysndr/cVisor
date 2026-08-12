@@ -36,13 +36,7 @@ fn run(cmd: &mut Command) -> bool {
 fn cmd_test(args: &[String]) -> bool {
     let arch = parse_arch(args);
     let target = format!("{arch}-unknown-linux-musl");
-    run(Command::new("cargo").args([
-        "test",
-        "-p",
-        "bvisor-core",
-        "--target",
-        &target,
-    ]))
+    run(Command::new("cargo").args(["test", "-p", "bvisor-core", "--target", &target]))
 }
 
 fn cmd_run(args: &[String]) -> bool {
@@ -105,7 +99,14 @@ const NODE_TARGETS: &[(&str, &str)] = &[
 fn build_node_one(target: &str, platform_dir: &str) -> bool {
     let is_musl = target.contains("musl");
     let mut cmd = Command::new("cargo");
-    cmd.args(["zigbuild", "-p", "bvisor-node", "--target", target, "--release"]);
+    cmd.args([
+        "zigbuild",
+        "-p",
+        "bvisor-node",
+        "--target",
+        target,
+        "--release",
+    ]);
     if is_musl {
         // Dynamic musl cdylib.
         cmd.env("RUSTFLAGS", "-C target-feature=-crt-static");
@@ -188,7 +189,14 @@ fn cmd_ffi(args: &[String]) -> bool {
     let target = format!("{arch}-unknown-linux-musl");
     // Dynamic musl cdylib: disable crt-static and link via zig.
     let ok = run(Command::new("cargo")
-        .args(["zigbuild", "-p", "bvisor-ffi", "--target", &target, "--release"])
+        .args([
+            "zigbuild",
+            "-p",
+            "bvisor-ffi",
+            "--target",
+            &target,
+            "--release",
+        ])
         .env("RUSTFLAGS", "-C target-feature=-crt-static"));
     if !ok {
         return false;

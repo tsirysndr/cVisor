@@ -44,9 +44,7 @@ impl DirEntryMap {
 
     /// Iterate entries in insertion order as (name, d_type).
     pub fn iter(&self) -> impl Iterator<Item = (&str, u8)> {
-        self.order
-            .iter()
-            .map(move |k| (k.as_str(), self.types[k]))
+        self.order.iter().map(move |k| (k.as_str(), self.types[k]))
     }
 }
 
@@ -78,7 +76,10 @@ pub fn collect_dirents(raw: &[u8], map: &mut DirEntryMap, dedup: bool) {
         }
         let d_type = raw[pos + 18];
         let name_bytes = &raw[pos + NAME_OFFSET..pos + reclen];
-        let name_len = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
+        let name_len = name_bytes
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(name_bytes.len());
         if let Ok(name) = std::str::from_utf8(&name_bytes[..name_len]) {
             map.insert(name, d_type, dedup);
         }
@@ -96,7 +97,10 @@ pub fn parse_dirent_names(buf: &[u8]) -> Vec<String> {
             break;
         }
         let name_bytes = &buf[pos + NAME_OFFSET..pos + reclen];
-        let name_len = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
+        let name_len = name_bytes
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(name_bytes.len());
         if let Ok(name) = std::str::from_utf8(&name_bytes[..name_len]) {
             out.push(name.to_string());
         }

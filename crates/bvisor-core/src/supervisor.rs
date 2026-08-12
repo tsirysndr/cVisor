@@ -21,13 +21,13 @@ use crate::mem::{GuestMem, GuestMemExt};
 use crate::procinfo::ProcInfo;
 use crate::seccomp::notif::{self, SeccompNotif, SeccompNotifResp};
 use crate::seccomp::notifier::Notifier;
+use crate::virt::fs::backend;
 use crate::virt::fs::fd_table::FdTable;
 use crate::virt::fs::file::File;
 use crate::virt::overlay_root::OverlayRoot;
 use crate::virt::path::{resolve_and_route, BackendType, ResolvedRoute};
 use crate::virt::proc::Threads;
 use crate::virt::tombstones::Tombstones;
-use crate::virt::fs::backend;
 
 const MAX_INFLIGHT: usize = 8;
 const IO_CHUNK: usize = 4096;
@@ -263,10 +263,16 @@ impl Supervisor {
             self.sys_clone(notif)
         } else if is_blocked_eperm(nr) {
             // Inbound networking: outbound-only sandbox.
-            Ok(notif::reply_error(notif.id, crate::error::Errno::PERM.code()))
+            Ok(notif::reply_error(
+                notif.id,
+                crate::error::Errno::PERM.code(),
+            ))
         } else if is_blocked_enosys(nr) {
             // Escape/privilege/resource-control syscalls: report unavailable.
-            Ok(notif::reply_error(notif.id, crate::error::Errno::NOSYS.code()))
+            Ok(notif::reply_error(
+                notif.id,
+                crate::error::Errno::NOSYS.code(),
+            ))
         } else {
             // Default: let the kernel run it (process-local memory, signals,
             // time, futex, identity reads, etc.). Under the `fail-loudly`
@@ -518,7 +524,9 @@ impl Supervisor {
         let oldfd = notif.data.args[0] as i32;
         let mut state = self.state.lock().unwrap();
         let procinfo = &*self.procinfo;
-        let table = state.fd_table(caller, procinfo).ok_or(SysError(Errno::SRCH))?;
+        let table = state
+            .fd_table(caller, procinfo)
+            .ok_or(SysError(Errno::SRCH))?;
         let Some(file) = table.get(oldfd) else {
             return Ok(notif::reply_continue(notif.id));
         };
@@ -560,7 +568,9 @@ impl Supervisor {
         }
         let mut state = self.state.lock().unwrap();
         let procinfo = &*self.procinfo;
-        let table = state.fd_table(caller, procinfo).ok_or(SysError(Errno::SRCH))?;
+        let table = state
+            .fd_table(caller, procinfo)
+            .ok_or(SysError(Errno::SRCH))?;
         let Some(file) = table.get(oldfd) else {
             // oldfd is a real (untracked) fd — e.g. a shell restoring saved
             // stdout. If newfd was one of ours, drop it so our table stops
@@ -600,7 +610,9 @@ impl Supervisor {
 
         let mut state = self.state.lock().unwrap();
         let procinfo = &*self.procinfo;
-        let table = state.fd_table(caller, procinfo).ok_or(SysError(Errno::SRCH))?;
+        let table = state
+            .fd_table(caller, procinfo)
+            .ok_or(SysError(Errno::SRCH))?;
         let read_vfd = table.insert(read_file, cloexec);
         let write_vfd = table.insert(write_file, cloexec);
         drop(state);
@@ -621,7 +633,11 @@ impl Supervisor {
         let mut state = self.state.lock().unwrap();
         let procinfo = &*self.procinfo;
         state.threads.get_or_sync(caller, procinfo);
-        let cwd = state.threads.cwd(caller).ok_or(SysError(Errno::SRCH))?.to_string();
+        let cwd = state
+            .threads
+            .cwd(caller)
+            .ok_or(SysError(Errno::SRCH))?
+            .to_string();
         drop(state);
         if buf_size < cwd.len() + 1 {
             return Err(SysError(Errno::RANGE));
@@ -646,7 +662,10 @@ impl Supervisor {
         let route = resolve_and_route(&base, path)?;
         let (btype, normalized) = match route {
             ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
-            ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
         };
         // Confirm the target exists and is a directory from the guest's view
         // (backend-aware, so tmp-overlay dirs are recognized).
@@ -727,7 +746,10 @@ impl Supervisor {
         Ok(match target {
             ProcTarget::DirProc | ProcTarget::DirSelf => (Vec::new(), true),
             ProcTarget::DirPid(n) => {
-                state.threads.abs_tgid_for_ns(n).ok_or(SysError(Errno::NOENT))?;
+                state
+                    .threads
+                    .abs_tgid_for_ns(n)
+                    .ok_or(SysError(Errno::NOENT))?;
                 (Vec::new(), true)
             }
             ProcTarget::SelfStatus => {
@@ -736,7 +758,10 @@ impl Supervisor {
                 (format_status(pid, ppid), false)
             }
             ProcTarget::PidStatus(n) => {
-                let abs = state.threads.abs_tgid_for_ns(n).ok_or(SysError(Errno::NOENT))?;
+                let abs = state
+                    .threads
+                    .abs_tgid_for_ns(n)
+                    .ok_or(SysError(Errno::NOENT))?;
                 let ppid = state.threads.ns_ppid(abs).ok_or(SysError(Errno::NOENT))?;
                 (format_status(n, ppid), false)
             }
@@ -780,7 +805,10 @@ impl Supervisor {
 
         // AT_EMPTY_PATH + empty path ≡ fstat(dirfd).
         let mut pbuf = [0u8; 256];
-        let raw = self.mem.read_string(caller, path_ptr, &mut pbuf).unwrap_or(b"");
+        let raw = self
+            .mem
+            .read_string(caller, path_ptr, &mut pbuf)
+            .unwrap_or(b"");
         if flags & libc::AT_EMPTY_PATH != 0 && raw.is_empty() {
             if dirfd == 0 || dirfd == 1 || dirfd == 2 {
                 return Ok(notif::reply_continue(notif.id));
@@ -802,7 +830,10 @@ impl Supervisor {
         let route = state.resolve_path(caller, path, dirfd, procinfo)?;
         let (btype, normalized) = match route {
             ResolvedRoute::Block => return Err(SysError(Errno::NOENT)),
-            ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
         };
         if matches!(btype, BackendType::Cow | BackendType::Tmp)
             && (state.tombstones.is_tombstoned(&normalized)
@@ -839,7 +870,10 @@ impl Supervisor {
         let route = state.resolve_path(caller, path, dirfd, procinfo)?;
         let (btype, normalized) = match route {
             ResolvedRoute::Block => return Err(SysError(Errno::ACCES)),
-            ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
         };
         if matches!(btype, BackendType::Cow | BackendType::Tmp)
             && (state.tombstones.is_tombstoned(&normalized)
@@ -941,7 +975,10 @@ impl Supervisor {
         let route = state.resolve_path(caller, path, dirfd, procinfo)?;
         let (btype, normalized) = match route {
             ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
-            ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
         };
         match btype {
             BackendType::Passthrough | BackendType::Proc | BackendType::Event => {
@@ -988,7 +1025,10 @@ impl Supervisor {
         let route = state.resolve_path(caller, path, dirfd, procinfo)?;
         let (btype, normalized) = match route {
             ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
-            ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
         };
         match btype {
             BackendType::Passthrough | BackendType::Proc | BackendType::Event => {
@@ -1049,7 +1089,10 @@ impl Supervisor {
             let procinfo = &*self.procinfo;
             match state.resolve_path(caller, path, dirfd, procinfo)? {
                 ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
-                ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+                ResolvedRoute::Handle {
+                    backend,
+                    normalized,
+                } => (backend, normalized),
             }
         };
         let mut link = vec![0u8; buf_size.max(1)];
@@ -1084,7 +1127,10 @@ impl Supervisor {
         let route = state.resolve_path(caller, linkpath, newdirfd, procinfo)?;
         let (btype, normalized) = match route {
             ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
-            ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
         };
         match btype {
             BackendType::Passthrough | BackendType::Proc | BackendType::Event => {
@@ -1283,7 +1329,11 @@ impl Supervisor {
         let file = self.caller_fd(caller, fd).ok_or(SysError(Errno::BADF))?;
         let mut buf = vec![0u8; count];
         let want_addr = src_ptr != 0 && addrlen_ptr != 0;
-        let mut src = if want_addr { vec![0u8; 128] } else { Vec::new() };
+        let mut src = if want_addr {
+            vec![0u8; 128]
+        } else {
+            Vec::new()
+        };
         let (n, src_len) = file.recv_from(
             &mut buf,
             flags,
@@ -1348,7 +1398,11 @@ impl Supervisor {
         let iovlen: u64 = self.mem.read_val(caller, msg_addr + 24)?;
 
         let want_addr = name_ptr != 0 && name_len > 0;
-        let mut src = if want_addr { vec![0u8; 128] } else { Vec::new() };
+        let mut src = if want_addr {
+            vec![0u8; 128]
+        } else {
+            Vec::new()
+        };
         let mut buf = vec![0u8; IO_CHUNK];
         let (n, src_len) = file.recv_from(
             &mut buf,
@@ -1430,7 +1484,9 @@ impl Supervisor {
 
         let mut state = self.state.lock().unwrap();
         let procinfo = &*self.procinfo;
-        let table = state.fd_table(caller, procinfo).ok_or(SysError(Errno::SRCH))?;
+        let table = state
+            .fd_table(caller, procinfo)
+            .ok_or(SysError(Errno::SRCH))?;
         // Not one of our fds: let the kernel handle it.
         let Some(file) = table.get(fd) else {
             return Ok(notif::reply_continue(notif.id));
@@ -1448,7 +1504,11 @@ impl Supervisor {
                 Ok(notif::reply_success(notif.id, newfd as i64))
             }
             libc::F_GETFD => {
-                let v = if table.get_cloexec(fd) { libc::FD_CLOEXEC } else { 0 };
+                let v = if table.get_cloexec(fd) {
+                    libc::FD_CLOEXEC
+                } else {
+                    0
+                };
                 Ok(notif::reply_success(notif.id, v as i64))
             }
             libc::F_SETFD => {
@@ -1463,8 +1523,13 @@ impl Supervisor {
             }
             // Advisory locking / ownership / signal commands: stubbed to success.
             // F_SETSIG=10, F_GETSIG=11 (not exposed by libc on musl).
-            libc::F_GETLK | libc::F_SETLK | libc::F_SETLKW | libc::F_GETOWN
-            | libc::F_SETOWN | 10 | 11 => Ok(notif::reply_success(notif.id, 0)),
+            libc::F_GETLK
+            | libc::F_SETLK
+            | libc::F_SETLKW
+            | libc::F_GETOWN
+            | libc::F_SETOWN
+            | 10
+            | 11 => Ok(notif::reply_success(notif.id, 0)),
             _ => Err(SysError(Errno::INVAL)),
         }
     }
@@ -1506,7 +1571,10 @@ impl Supervisor {
         let route = state.resolve_path(caller, path, dirfd, procinfo)?;
         let (btype, normalized) = match route {
             ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
-            ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
         };
         if matches!(btype, BackendType::Cow | BackendType::Tmp)
             && state.tombstones.is_tombstoned(&normalized)
@@ -1551,7 +1619,10 @@ impl Supervisor {
         let route = state.resolve_path(caller, path, dirfd, procinfo)?;
         let (btype, normalized) = match route {
             ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
-            ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
         };
         match btype {
             BackendType::Cow => {
@@ -1579,12 +1650,17 @@ impl Supervisor {
             let mut state = self.state.lock().unwrap();
             let procinfo = &*self.procinfo;
             state.threads.get_or_sync(caller, procinfo);
-            state.threads.abs_tgid_for_ns(ns_tgid).ok_or(SysError(Errno::SRCH))?
+            state
+                .threads
+                .abs_tgid_for_ns(ns_tgid)
+                .ok_or(SysError(Errno::SRCH))?
         };
         // SAFETY: real kill of a known guest tgid.
         let rc = unsafe { libc::kill(abs, sig) };
         if rc < 0 {
-            return Err(SysError(Errno::from_raw(errno_now()).unwrap_or(Errno::PERM)));
+            return Err(SysError(
+                Errno::from_raw(errno_now()).unwrap_or(Errno::PERM),
+            ));
         }
         Ok(notif::reply_success(notif.id, 0))
     }
@@ -1602,13 +1678,19 @@ impl Supervisor {
             let mut state = self.state.lock().unwrap();
             let procinfo = &*self.procinfo;
             state.threads.get_or_sync(caller, procinfo);
-            state.threads.abs_tid_for_ns(ns_tid).ok_or(SysError(Errno::SRCH))?
+            state
+                .threads
+                .abs_tid_for_ns(ns_tid)
+                .ok_or(SysError(Errno::SRCH))?
         };
         // SAFETY: tgkill(-1, tid, sig) delivers to a specific thread; use kill on
         // the tid which for a thread targets that task.
-        let rc = unsafe { libc::syscall(libc::SYS_tkill, abs as libc::c_long, sig as libc::c_long) };
+        let rc =
+            unsafe { libc::syscall(libc::SYS_tkill, abs as libc::c_long, sig as libc::c_long) };
         if rc < 0 {
-            return Err(SysError(Errno::from_raw(errno_now()).unwrap_or(Errno::PERM)));
+            return Err(SysError(
+                Errno::from_raw(errno_now()).unwrap_or(Errno::PERM),
+            ));
         }
         Ok(notif::reply_success(notif.id, 0))
     }
@@ -1673,7 +1755,10 @@ impl Supervisor {
         let route = state.resolve_path(caller, path, libc::AT_FDCWD, procinfo)?;
         let (btype, normalized) = match route {
             ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
-            ResolvedRoute::Handle { backend, normalized } => (backend, normalized),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
         };
 
         // Determine the real kernel path to exec, if it needs redirection.
@@ -1712,7 +1797,11 @@ impl Supervisor {
     /// exit → prune the caller's virtual thread, then let the kernel exit it.
     fn sys_exit(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
         let caller = notif.pid as i32;
-        self.state.lock().unwrap().threads.handle_thread_exit(caller);
+        self.state
+            .lock()
+            .unwrap()
+            .threads
+            .handle_thread_exit(caller);
         Ok(notif::reply_continue(notif.id))
     }
 
@@ -2029,7 +2118,14 @@ mod tests {
         let mut buf = [0u8; 64];
         let r = sup.handle(&notif(
             libc::SYS_recvfrom,
-            [sv[1] as u64, addr_of_mut(&mut buf), buf.len() as u64, 0, 0, 0],
+            [
+                sv[1] as u64,
+                addr_of_mut(&mut buf),
+                buf.len() as u64,
+                0,
+                0,
+                0,
+            ],
         ));
         assert_eq!(r.val, data.len() as i64);
         assert_eq!(&buf[..data.len()], data);

@@ -141,7 +141,10 @@ impl Backend {
     pub fn send_to(&self, data: &[u8], flags: i32, dest: Option<&[u8]>) -> SysResult<usize> {
         let fd = self.as_socket_fd()?;
         let (addr_ptr, addr_len) = match dest {
-            Some(a) => (a.as_ptr() as *const libc::sockaddr, a.len() as libc::socklen_t),
+            Some(a) => (
+                a.as_ptr() as *const libc::sockaddr,
+                a.len() as libc::socklen_t,
+            ),
             None => (std::ptr::null(), 0),
         };
         // SAFETY: fd is a real socket; data/addr are valid for their lengths.
@@ -171,7 +174,11 @@ impl Backend {
     ) -> SysResult<(usize, u32)> {
         let fd = self.as_socket_fd()?;
         let (addr_ptr, mut addr_len, has_addr) = match &src {
-            Some(a) => (a.as_ptr() as *mut libc::sockaddr, a.len() as libc::socklen_t, true),
+            Some(a) => (
+                a.as_ptr() as *mut libc::sockaddr,
+                a.len() as libc::socklen_t,
+                true,
+            ),
             None => (std::ptr::null_mut(), 0, false),
         };
         let len_ptr = if has_addr {
@@ -343,13 +350,7 @@ pub fn tmp_readlink(overlay: &OverlayRoot, path: &str, buf: &mut [u8]) -> SysRes
 fn do_readlink(path: &str, buf: &mut [u8]) -> SysResult<usize> {
     let c = std::ffi::CString::new(path).map_err(|_| SysError(Errno::INVAL))?;
     // SAFETY: valid path; buf is a writable region of buf.len() bytes.
-    let n = unsafe {
-        libc::readlink(
-            c.as_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_char,
-            buf.len(),
-        )
-    };
+    let n = unsafe { libc::readlink(c.as_ptr(), buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
     if n < 0 {
         return Err(last_errno());
     }

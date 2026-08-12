@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main, rewrite-in-rust]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: unit + e2e (Alpine, seccomp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (core, musl target)
+        run: cargo clippy -p bvisor-core --target x86_64-unknown-linux-musl --tests -- -D warnings
+
+      # bVisor installs its own seccomp filter, so the tests must run in a
+      # container with the default seccomp profile disabled. `cargo xtask test`
+      # cross-compiles static musl binaries and runs each — unit tests and the
+      # real-command e2e suite (tests/passthrough.rs) — inside Alpine via
+      # `docker run --security-opt seccomp=unconfined`. The ubuntu-latest runner
+      # is x86_64 with Docker preinstalled, so `--platform linux/amd64` is
+      # native (no emulation).
+      - name: Unit + e2e tests
+        run: cargo xtask test --arch x86_64

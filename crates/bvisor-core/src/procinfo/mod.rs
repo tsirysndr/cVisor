@@ -44,9 +44,17 @@ pub fn parse_status(tid: AbsTid, text: &str) -> Result<ThreadStatus, StatusParse
 
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("Tgid:") {
-            tgid = Some(rest.trim().parse().map_err(|_| StatusParseError::BadNumber)?);
+            tgid = Some(
+                rest.trim()
+                    .parse()
+                    .map_err(|_| StatusParseError::BadNumber)?,
+            );
         } else if let Some(rest) = line.strip_prefix("PPid:") {
-            ptid = Some(rest.trim().parse().map_err(|_| StatusParseError::BadNumber)?);
+            ptid = Some(
+                rest.trim()
+                    .parse()
+                    .map_err(|_| StatusParseError::BadNumber)?,
+            );
         } else if let Some(rest) = line.strip_prefix("NStgid:") {
             nstgids = parse_id_list(rest)?;
         } else if let Some(rest) = line.strip_prefix("NSpid:") {

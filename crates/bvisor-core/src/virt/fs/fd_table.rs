@@ -113,7 +113,10 @@ impl FdTable {
     }
 
     pub fn get_cloexec(&self, vfd: VirtualFd) -> bool {
-        self.open_files.get(&vfd).map(|e| e.cloexec).unwrap_or(false)
+        self.open_files
+            .get(&vfd)
+            .map(|e| e.cloexec)
+            .unwrap_or(false)
     }
 
     pub fn set_cloexec(&mut self, vfd: VirtualFd, value: bool) -> bool {

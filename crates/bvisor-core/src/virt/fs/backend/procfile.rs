@@ -65,10 +65,7 @@ mod tests {
             parse_proc_path("/proc/self/status").unwrap(),
             ProcTarget::SelfStatus
         );
-        assert_eq!(
-            parse_proc_path("/proc/42").unwrap(),
-            ProcTarget::DirPid(42)
-        );
+        assert_eq!(parse_proc_path("/proc/42").unwrap(), ProcTarget::DirPid(42));
         assert_eq!(
             parse_proc_path("/proc/42/status").unwrap(),
             ProcTarget::PidStatus(42)

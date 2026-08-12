@@ -94,9 +94,7 @@ pub mod manager {
                 if err == nix::errno::Errno::EEXIST {
                     continue; // slot taken by another sandbox; try the next
                 }
-                return Err(SysError(
-                    Errno::from_raw(err as i32).unwrap_or(Errno::PERM),
-                ));
+                return Err(SysError(Errno::from_raw(err as i32).unwrap_or(Errno::PERM)));
             }
             Err(SysError(Errno::NOSPC))
         }

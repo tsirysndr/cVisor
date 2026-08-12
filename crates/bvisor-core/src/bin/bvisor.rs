@@ -14,7 +14,9 @@ fn main() {
     use bvisor_core::{execute, generate_uid, LogBuffer, LogLevel};
     use std::sync::Arc;
 
-    let cmd = std::env::args().nth(1).unwrap_or_else(|| "/smoke".to_string());
+    let cmd = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/smoke".to_string());
 
     let stdout = Arc::new(LogBuffer::new());
     let stderr = Arc::new(LogBuffer::new());

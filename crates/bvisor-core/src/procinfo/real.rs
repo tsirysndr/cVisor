@@ -20,7 +20,11 @@ impl ProcInfo for RealProcInfo {
             return tids;
         };
         for proc in procs.flatten() {
-            let Some(tgid) = proc.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) else {
+            let Some(tgid) = proc
+                .file_name()
+                .to_str()
+                .and_then(|s| s.parse::<i32>().ok())
+            else {
                 continue;
             };
             let task_dir = format!("/proc/{tgid}/task");
@@ -28,7 +32,11 @@ impl ProcInfo for RealProcInfo {
                 continue;
             };
             for task in tasks.flatten() {
-                if let Some(tid) = task.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) {
+                if let Some(tid) = task
+                    .file_name()
+                    .to_str()
+                    .and_then(|s| s.parse::<i32>().ok())
+                {
                     tids.push(tid);
                 }
             }
