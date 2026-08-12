@@ -76,7 +76,9 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Zig + cargo-zigbuild
-        uses: mlugg/setup-zig@v1
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-zigbuild
