@@ -1,10 +1,10 @@
 /**
- * Running Python inside a bVisor sandbox.
+ * Running Python inside a cVisor sandbox.
  *
  * How to write a Python script to disk and execute it,
  * all within the same isolated sandbox instance.
  */
-import { Sandbox } from "bvisor";
+import { Sandbox } from "cvisor";
 
 const sb = new Sandbox();
 
@@ -13,7 +13,7 @@ async function run(cmd: string): Promise<void> {
   const output = sb.runCmd(cmd);
   const stdout = await output.stdout();
   const stderr = await output.stderr();
-  console.log(`bvisor> ${cmd}`);
+  console.log(`cvisor> ${cmd}`);
   if (stdout) console.log(stdout.trimEnd());
   if (stderr) console.error(stderr.trimEnd());
   console.log();
@@ -21,7 +21,7 @@ async function run(cmd: string): Promise<void> {
 
 // Write a simple Python script to the sandbox filesystem, then run it.
 await run("python3 --version");
-await run("echo 'print(\"Hello from Python inside bVisor!\")' > hello.py");
+await run("echo 'print(\"Hello from Python inside cVisor!\")' > hello.py");
 await run("python3 hello.py");
 
 // Here is a script that produces some of the Fibonacci sequence.

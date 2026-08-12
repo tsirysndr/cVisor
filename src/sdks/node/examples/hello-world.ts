@@ -1,15 +1,15 @@
 /**
  * Hello World!
  *
- * How to run a command in a bVisor sandbox.
+ * How to run a command in a cVisor sandbox.
  */
-import { Sandbox } from "bvisor";
+import { Sandbox } from "cvisor";
 
 // Create the sandbox
 const sb = new Sandbox();
 
 // Start the bash command
-const output = sb.runCmd("echo 'Hello from bVisor!'");
+const output = sb.runCmd("echo 'Hello from cVisor!'");
 
 // Await the output streams
 const stdout = await output.stdout();

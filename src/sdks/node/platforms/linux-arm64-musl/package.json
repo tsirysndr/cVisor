@@ -1,5 +1,5 @@
 {
-  "name": "@bvisor/linux-arm64-musl",
+  "name": "@cvisor/linux-arm64-musl",
   "version": "0.0.6",
   "os": [
     "linux"
@@ -10,8 +10,8 @@
   "libc": [
     "musl"
   ],
-  "main": "libbvisor.node",
+  "main": "libcvisor.node",
   "files": [
-    "libbvisor.node"
+    "libcvisor.node"
   ]
 }

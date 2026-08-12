@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cvisor-core",
+    "crates/cvisor-node",
+    "crates/cvisor-ffi",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.0.6"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/butter-dot-dev/cVisor"
+
+[workspace.dependencies]
+libc = "0.2"
+nix = { version = "0.30", default-features = false }
+getrandom = "0.3"
+crossbeam-channel = "0.5"

@@ -3,7 +3,7 @@ import { familySync, MUSL } from "detect-libc";
 import { External } from "./napi";
 
 if (platform() !== "linux") {
-  throw new Error("bVisor only supports Linux");
+  throw new Error("cVisor only supports Linux");
 }
 
 /** FFI contract: typed interface for the native Zig module loaded via require(). */
@@ -24,4 +24,4 @@ export interface NativeModule {
 }
 
 const libc = familySync() === MUSL ? "musl" : "gnu";
-export const native: NativeModule = require(`@bvisor/linux-${arch()}-${libc}`);
+export const native: NativeModule = require(`@cvisor/linux-${arch()}-${libc}`);

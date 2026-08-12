@@ -1,10 +1,10 @@
 /**
- * Nested directory structures in a bVisor sandbox.
+ * Nested directory structures in a cVisor sandbox.
  *
  * Because the sandbox doesn't track state between commands, any operation
  * that needs to work inside a subdirectory must use `cd <dir> && <cmd>`.
  */
-import { Sandbox } from "bvisor";
+import { Sandbox } from "cvisor";
 
 const sb = new Sandbox();
 
@@ -13,7 +13,7 @@ async function run(cmd: string): Promise<void> {
   const output = sb.runCmd(cmd);
   const stdout = await output.stdout();
   const stderr = await output.stderr();
-  console.log(`bvisor> ${cmd}`);
+  console.log(`cvisor> ${cmd}`);
   if (stdout) console.log(stdout.trimEnd());
   if (stderr) console.error(stderr.trimEnd());
   console.log();

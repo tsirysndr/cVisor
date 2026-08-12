@@ -1,0 +1,33 @@
+[package]
+name = "cvisor-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "cvisor_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cvisor"
+path = "src/bin/cvisor.rs"
+
+[[bin]]
+name = "smoke"
+path = "src/bin/smoke.rs"
+
+[features]
+# Panic on unimplemented syscalls instead of silently returning ENOSYS.
+fail-loudly = []
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+nix = { workspace = true, features = [
+    "process", "fs", "poll", "socket", "uio", "signal",
+    "event", "ioctl", "sched", "dir",
+] }
+crossbeam-channel = { workspace = true }
+
+[dependencies]
+getrandom = { workspace = true }
