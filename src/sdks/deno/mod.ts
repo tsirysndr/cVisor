@@ -1,4 +1,4 @@
-// bVisor Deno SDK — Deno FFI (Deno.dlopen) wrapper over the libbvisor C ABI.
+// cVisor Deno SDK — Deno FFI (Deno.dlopen) wrapper over the libcvisor C ABI.
 //
 //   import { Sandbox } from "./mod.ts";
 //   const out = new Sandbox().run("echo hello");
@@ -7,24 +7,24 @@
 // Run with: deno run --allow-ffi --allow-env --unstable-ffi mod.ts
 
 function libraryPath(): string {
-  const override = Deno.env.get("BVISOR_LIB");
+  const override = Deno.env.get("CVISOR_LIB");
   if (override) return override;
   const a = Deno.build.arch === "aarch64" ? "aarch64" : "x86_64";
-  return new URL(`./native/libbvisor-${a}.so`, import.meta.url).pathname;
+  return new URL(`./native/libcvisor-${a}.so`, import.meta.url).pathname;
 }
 
 const lib = Deno.dlopen(libraryPath(), {
-  bvisor_sandbox_new: { parameters: [], result: "pointer" },
-  bvisor_sandbox_free: { parameters: ["pointer"], result: "void" },
-  bvisor_sandbox_set_log_level: {
+  cvisor_sandbox_new: { parameters: [], result: "pointer" },
+  cvisor_sandbox_free: { parameters: ["pointer"], result: "void" },
+  cvisor_sandbox_set_log_level: {
     parameters: ["pointer", "i32"],
     result: "void",
   },
-  bvisor_run: { parameters: ["pointer", "buffer"], result: "pointer" },
-  bvisor_output_free: { parameters: ["pointer"], result: "void" },
-  bvisor_output_stdout: { parameters: ["pointer", "buffer"], result: "pointer" },
-  bvisor_output_stderr: { parameters: ["pointer", "buffer"], result: "pointer" },
-  bvisor_bytes_free: { parameters: ["pointer", "usize"], result: "void" },
+  cvisor_run: { parameters: ["pointer", "buffer"], result: "pointer" },
+  cvisor_output_free: { parameters: ["pointer"], result: "void" },
+  cvisor_output_stdout: { parameters: ["pointer", "buffer"], result: "pointer" },
+  cvisor_output_stderr: { parameters: ["pointer", "buffer"], result: "pointer" },
+  cvisor_bytes_free: { parameters: ["pointer", "usize"], result: "void" },
 });
 
 export interface Output {
@@ -44,7 +44,7 @@ function readOutput(out: Deno.PointerValue, accessor: Accessor): Uint8Array {
   const view = new Deno.UnsafePointerView(p);
   const copy = new Uint8Array(n);
   view.copyInto(copy);
-  lib.symbols.bvisor_bytes_free(p, BigInt(n));
+  lib.symbols.cvisor_bytes_free(p, BigInt(n));
   return copy;
 }
 
@@ -52,21 +52,21 @@ export class Sandbox {
   #ptr: Deno.PointerValue;
 
   constructor() {
-    this.#ptr = lib.symbols.bvisor_sandbox_new();
+    this.#ptr = lib.symbols.cvisor_sandbox_new();
     if (this.#ptr === null) throw new Error("failed to create sandbox");
   }
 
   setLogLevel(level: "OFF" | "DEBUG"): void {
-    lib.symbols.bvisor_sandbox_set_log_level(this.#ptr, level === "DEBUG" ? 1 : 0);
+    lib.symbols.cvisor_sandbox_set_log_level(this.#ptr, level === "DEBUG" ? 1 : 0);
   }
 
   run(command: string): Output {
     const cmd = new TextEncoder().encode(command + "\0");
-    const out = lib.symbols.bvisor_run(this.#ptr, cmd);
+    const out = lib.symbols.cvisor_run(this.#ptr, cmd);
     if (out === null) throw new Error("sandbox run failed");
     try {
-      const stdoutBytes = readOutput(out, lib.symbols.bvisor_output_stdout);
-      const stderrBytes = readOutput(out, lib.symbols.bvisor_output_stderr);
+      const stdoutBytes = readOutput(out, lib.symbols.cvisor_output_stdout);
+      const stderrBytes = readOutput(out, lib.symbols.cvisor_output_stderr);
       const dec = new TextDecoder();
       return {
         stdoutBytes,
@@ -75,13 +75,13 @@ export class Sandbox {
         stderr: dec.decode(stderrBytes),
       };
     } finally {
-      lib.symbols.bvisor_output_free(out);
+      lib.symbols.cvisor_output_free(out);
     }
   }
 
   close(): void {
     if (this.#ptr !== null) {
-      lib.symbols.bvisor_sandbox_free(this.#ptr);
+      lib.symbols.cvisor_sandbox_free(this.#ptr);
       this.#ptr = null;
     }
   }

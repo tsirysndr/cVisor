@@ -14,7 +14,7 @@ const platforms = [
 
 // Publish platform packages first
 for (const platform of platforms) {
-  console.log(`Publishing @bvisor/${platform}...`);
+  console.log(`Publishing @cvisor/${platform}...`);
   execSync("bun publish --access public", {
     cwd: new URL(`../platforms/${platform}`, import.meta.url).pathname,
     stdio: "inherit",
@@ -28,7 +28,7 @@ for (const key of Object.keys(pkg.optionalDependencies)) {
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 
 try {
-  console.log(`Publishing bvisor@${version}...`);
+  console.log(`Publishing cvisor@${version}...`);
   execSync("bun publish --access public", {
     cwd: new URL("..", import.meta.url).pathname,
     stdio: "inherit",

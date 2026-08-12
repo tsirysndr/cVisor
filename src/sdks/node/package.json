@@ -1,5 +1,5 @@
 {
-  "name": "bvisor",
+  "name": "cvisor",
   "version": "0.0.6",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -28,10 +28,10 @@
     "detect-libc": "^2.0.3"
   },
   "optionalDependencies": {
-    "@bvisor/linux-arm64-gnu": "workspace:*",
-    "@bvisor/linux-arm64-musl": "workspace:*",
-    "@bvisor/linux-x64-gnu": "workspace:*",
-    "@bvisor/linux-x64-musl": "workspace:*"
+    "@cvisor/linux-arm64-gnu": "workspace:*",
+    "@cvisor/linux-arm64-musl": "workspace:*",
+    "@cvisor/linux-x64-gnu": "workspace:*",
+    "@cvisor/linux-x64-musl": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.9",

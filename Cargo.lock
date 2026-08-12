@@ -15,7 +15,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
-name = "bvisor-core"
+name = "cvisor-core"
 version = "0.0.6"
 dependencies = [
  "crossbeam-channel",
@@ -25,18 +25,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "bvisor-ffi"
+name = "cvisor-ffi"
 version = "0.0.6"
 dependencies = [
- "bvisor-core",
+ "cvisor-core",
  "libc",
 ]
 
 [[package]]
-name = "bvisor-node"
+name = "cvisor-node"
 version = "0.0.6"
 dependencies = [
- "bvisor-core",
+ "cvisor-core",
  "napi",
  "napi-build",
  "napi-derive",

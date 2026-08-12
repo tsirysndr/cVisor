@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "bvisor"
+name = "cvisor"
 version = "0.0.6"
 source = { editable = "." }
 

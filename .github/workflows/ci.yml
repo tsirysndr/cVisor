@@ -31,9 +31,9 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (core, musl target)
-        run: cargo clippy -p bvisor-core --target x86_64-unknown-linux-musl --tests -- -D warnings
+        run: cargo clippy -p cvisor-core --target x86_64-unknown-linux-musl --tests -- -D warnings
 
-      # bVisor installs its own seccomp filter, so the tests must run in a
+      # cVisor installs its own seccomp filter, so the tests must run in a
       # container with the default seccomp profile disabled. `cargo xtask test`
       # cross-compiles static musl binaries and runs each — unit tests and the
       # real-command e2e suite (tests/passthrough.rs) — inside Alpine via

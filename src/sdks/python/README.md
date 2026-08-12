@@ -1,17 +1,17 @@
-# bVisor — Python SDK
+# cVisor — Python SDK
 
-A `ctypes` FFI wrapper over the `libbvisor` C ABI. Linux-only.
+A `ctypes` FFI wrapper over the `libcvisor` C ABI. Linux-only.
 
 ## Install (uv)
 
 ```bash
-uv add bvisor
+uv add cvisor
 ```
 
 ## Usage
 
 ```python
-from bvisor import Sandbox
+from cvisor import Sandbox
 
 with Sandbox() as sb:
     out = sb.run("echo hello")
@@ -24,12 +24,12 @@ with Sandbox() as sb:
 
 ## Development
 
-The SDK loads `libbvisor.so`. Build it from the repo root and point the SDK at
-it via the `BVISOR_LIB` environment variable, or let the package resolve a copy
-bundled under `bvisor/_native/`:
+The SDK loads `libcvisor.so`. Build it from the repo root and point the SDK at
+it via the `CVISOR_LIB` environment variable, or let the package resolve a copy
+bundled under `cvisor/_native/`:
 
 ```bash
-# from the repo root — builds libbvisor.so into bvisor/_native/
+# from the repo root — builds libcvisor.so into cvisor/_native/
 cargo xtask ffi
 
 # run the tests with uv

@@ -1,26 +1,26 @@
-### bVisor - Embedded Bash Sandbox for Agents
+### cVisor - Embedded Bash Sandbox for Agents
 
-bVisor is an SDK and runtime for safely executing bash commands locally, without the need for remote sandboxes or local VMs/containers. 
+cVisor is an SDK and runtime for safely executing bash commands locally, without the need for remote sandboxes or local VMs/containers. 
 
-Inspired by [gVisor](https://github.com/google/gVisor), bVisor runs programs directly on the host machine, providing isolation by intercepting and virtualizing [Linux syscalls](https://en.wikipedia.org/wiki/System_call) from userspace. 
+Inspired by [gVisor](https://github.com/google/gVisor), cVisor runs programs directly on the host machine, providing isolation by intercepting and virtualizing [Linux syscalls](https://en.wikipedia.org/wiki/System_call) from userspace. 
 
-Unlike gVisor, bVisor is built to run directly in your application, spinning up sandboxes in ~2 milliseconds. This makes it ideal for ephemeral tasks commonly performed by LLM agents, such as code execution or filesystem operations.
+Unlike gVisor, cVisor is built to run directly in your application, spinning up sandboxes in ~2 milliseconds. This makes it ideal for ephemeral tasks commonly performed by LLM agents, such as code execution or filesystem operations.
 
-**Status**: bVisor is an early proof-of-concept and should not yet be used in production. If you detect any discrepancies between bVisor's behavior and the linux kernel, please file an issue.
+**Status**: cVisor is an early proof-of-concept and should not yet be used in production. If you detect any discrepancies between cVisor's behavior and the linux kernel, please file an issue.
 
-**Compatibility**: bVisor currently ships for Linux hosts only, with support for ARM and X86 architectures and glibc/musl ABIs.
+**Compatibility**: cVisor currently ships for Linux hosts only, with support for ARM and X86 architectures and glibc/musl ABIs.
 
 ## Usage
 
-The bVisor runtime ships wrapped in a Typescript SDK, installed via npm.
+The cVisor runtime ships wrapped in a Typescript SDK, installed via npm.
 
 ```bash
-npm install bvisor
+npm install cvisor
 ```
 
 Example usage:
 ```typescript
-import { Sandbox } from "bvisor";
+import { Sandbox } from "cvisor";
 
 const sb = new Sandbox();
 const output = sb.runCmd("echo 'Hello, world!'");
@@ -44,7 +44,7 @@ Python SDK and CLI are also planned.
 
 ## Examples
 
-Here are a selection of full examples which currently work in bVisor:
+Here are a selection of full examples which currently work in cVisor:
 - [Hello World](src/sdks/node/examples/hello-world.ts) - Run your first command in the sandbox
 - [Running Python](src/sdks/node/examples/python-hello.ts) - Write and execute a Python script 
 - [Testing Sandbox Boundaries](src/sdks/node/examples/sandbox-boundaries.ts) - See how the sandbox handles host fingerprinting, blocked paths, and filesystem isolation
@@ -52,18 +52,18 @@ Here are a selection of full examples which currently work in bVisor:
 
 ## Architecture
 
-bVisor is built on [Seccomp user notifier](https://man7.org/linux/man-pages/man2/seccomp.2.html), a Linux kernel feature that allows userspace processes to intercept and optionally handle syscalls from a child process. This allows bVisor to block or mock the kernel API (such as filesystem read/write, network access, etc.) to ensure the child process remains sandboxed.
+cVisor is built on [Seccomp user notifier](https://man7.org/linux/man-pages/man2/seccomp.2.html), a Linux kernel feature that allows userspace processes to intercept and optionally handle syscalls from a child process. This allows cVisor to block or mock the kernel API (such as filesystem read/write, network access, etc.) to ensure the child process remains sandboxed.
 
 Other than the overhead of syscall emulation, child processes run natively.
 
-bVisor is imageless, meaning it does not require a base image to run. It runs with direct visibility to the host filesystem. This allows system dependencies such as `npm` to work out of the box. Isolation is achieved via a copy-on-write overlay on top of the host filesystem. Files opened with write flags are copied to a sandbox-local directory. Read-only files are passed through to the real filesystem.
+cVisor is imageless, meaning it does not require a base image to run. It runs with direct visibility to the host filesystem. This allows system dependencies such as `npm` to work out of the box. Isolation is achieved via a copy-on-write overlay on top of the host filesystem. Files opened with write flags are copied to a sandbox-local directory. Read-only files are passed through to the real filesystem.
 
 ## Syscall Support
 
-Every Linux syscall falls into one of four categories in bVisor:
+Every Linux syscall falls into one of four categories in cVisor:
 
 #### Virtualized
-Syscalls are intercepted and handled in userspace by the bVisor virtual kernel.
+Syscalls are intercepted and handled in userspace by the cVisor virtual kernel.
 
 | | Syscalls |
 |-|----------|
@@ -75,7 +75,7 @@ Syscalls are intercepted and handled in userspace by the bVisor virtual kernel.
 | System info | `uname`, `sysinfo` |
 | Events | `eventfd2` |
 
-Note that bVisor may still call into the underlying kernel to virtualize any given syscall.
+Note that cVisor may still call into the underlying kernel to virtualize any given syscall.
 
 #### Passthrough
 Syscalls are forwarded to the kernel unmodified. These syscalls are process-local or read-only and do not require any virtualization.
@@ -148,7 +148,7 @@ Not yet handled but likely necessary for Bash compatibility. Currently return `E
 
 #### Rust
 
-bVisor is written in **Rust** (a Cargo workspace under `crates/`). It depends on
+cVisor is written in **Rust** (a Cargo workspace under `crates/`). It depends on
 Linux kernel features but is developed primarily on ARM Macs; cross-compilation
 uses [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild), and all
 kernel-facing tests run in Docker.
@@ -156,19 +156,19 @@ kernel-facing tests run in Docker.
 **Requires**: a stable Rust toolchain with the four linux targets, `cargo-zigbuild`, and Docker.
 
 ```bash
-cargo test -p bvisor-core        # pure-logic unit tests on the host (macOS ok)
+cargo test -p cvisor-core        # pure-logic unit tests on the host (macOS ok)
 cargo xtask test                 # full unit + e2e suite in Alpine (Docker, cross-compiled musl)
 cargo xtask run                  # E2E smoke scorecard in the sandbox in Docker
-cargo xtask ffi                  # build libbvisor.so and distribute it to the FFI SDKs
-cargo xtask run-node             # build libbvisor.node + run the Node SDK test.ts in bun
-cargo xtask node-artifacts       # build libbvisor.node for all 4 platform packages
+cargo xtask ffi                  # build libcvisor.so and distribute it to the FFI SDKs
+cargo xtask run-node             # build libcvisor.node + run the Node SDK test.ts in bun
+cargo xtask node-artifacts       # build libcvisor.node for all 4 platform packages
 ```
 
 Build with the `fail-loudly` feature to panic on an unhandled syscall instead of
 returning ENOSYS:
 
 ```bash
-cargo build -p bvisor-core --features fail-loudly
+cargo build -p cvisor-core --features fail-loudly
 ```
 
 See `src/sdks/README.md` for the language SDKs (Node, Bun, Deno, Python, Ruby, Erlang).

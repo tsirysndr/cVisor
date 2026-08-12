@@ -11,8 +11,8 @@ src/sdks/node/
     sandbox.ts          # Sandbox class, public API
   test.ts               # Smoke test, run via `npm run dev`
   platforms/
-    linux-arm64/        # @bvisor/linux-arm64 package
-    linux-x64/          # @bvisor/linux-x64 package
+    linux-arm64/        # @cvisor/linux-arm64 package
+    linux-x64/          # @cvisor/linux-x64 package
   zig/                  # Zig source for native bindings
     lib.zig             # Entry point, napi module registration
     napi.zig            # N-API helpers, ZigExternal(T)

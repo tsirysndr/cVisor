@@ -1,0 +1,16 @@
+[package]
+name = "cvisor-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "cvisor"
+crate-type = ["cdylib"]
+
+# The C ABI is only meaningful on Linux (the sandbox runtime is Linux-only).
+# On other hosts this builds as an empty cdylib so the workspace compiles.
+[target.'cfg(target_os = "linux")'.dependencies]
+cvisor-core = { path = "../cvisor-core" }
+libc = { workspace = true }

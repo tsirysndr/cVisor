@@ -6,7 +6,7 @@ target/
 # Built FFI/native artifacts distributed into the SDK dirs by `cargo xtask ffi`.
 *.so
 src/sdks/*/native/
-src/sdks/python/bvisor/_native/
+src/sdks/python/cvisor/_native/
 src/sdks/erlang/priv/
 src/sdks/erlang/ebin/
 # uv / Python

@@ -1,7 +1,7 @@
 [project]
-name = "bvisor"
+name = "cvisor"
 version = "0.0.6"
-description = "In-process Linux sandbox — Python SDK (ctypes FFI over libbvisor)"
+description = "In-process Linux sandbox — Python SDK (ctypes FFI over libcvisor)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -16,20 +16,20 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/butter-dot-dev/bVisor"
-Repository = "https://github.com/butter-dot-dev/bVisor"
+Homepage = "https://github.com/butter-dot-dev/cVisor"
+Repository = "https://github.com/butter-dot-dev/cVisor"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["bvisor"]
+packages = ["cvisor"]
 
-# The compiled libbvisor.so is placed in bvisor/_native/ by the build step
+# The compiled libcvisor.so is placed in cvisor/_native/ by the build step
 # (`cargo xtask ffi`) and shipped inside the wheel.
 [tool.hatch.build.targets.wheel.force-include]
-"bvisor/_native" = "bvisor/_native"
+"cvisor/_native" = "cvisor/_native"
 
 [dependency-groups]
 dev = ["pytest>=8"]

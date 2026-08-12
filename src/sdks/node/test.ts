@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Sandbox } from "bvisor";
+import { Sandbox } from "cvisor";
 
 const isInteractive = Bun.argv.includes("--interactive");
 const logLevelIndex = Bun.argv.indexOf("--log-level");
@@ -12,12 +12,12 @@ const sb = new Sandbox();
 sb.setLogLevel(logLevel);
 
 if (isInteractive) {
-  process.stdout.write("bvisor> ");
+  process.stdout.write("cvisor> ");
   for await (const line of console) {
     const cmd = line.trim();
     if (!cmd) {
       process.stdout.write("use 'exit' to exit\n");
-      process.stdout.write("bvisor> ");
+      process.stdout.write("cvisor> ");
       continue;
     }
     if (cmd === "exit") break;
@@ -26,7 +26,7 @@ if (isInteractive) {
     const stderr = await output.stderr();
     if (stdout) process.stdout.write(stdout);
     if (stderr) process.stderr.write(`\x1b[31m${stderr}\x1b[0m`);
-    process.stdout.write("bvisor> ");
+    process.stdout.write("cvisor> ");
   }
 } else {
   const cmds = [

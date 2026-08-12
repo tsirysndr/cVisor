@@ -18,6 +18,6 @@ bin_name="$(basename "$bin")"
 exec docker run --rm \
     --security-opt seccomp=unconfined \
     --security-opt apparmor=unconfined \
-    -e BVISOR_DEBUG \
+    -e CVISOR_DEBUG \
     -v "$bin_dir:/t" \
     alpine "/t/$bin_name" "$@"

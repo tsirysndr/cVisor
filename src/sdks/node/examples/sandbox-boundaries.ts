@@ -1,18 +1,18 @@
 /**
- * Testing the safety of sandboxes in bVisor. 
+ * Testing the safety of sandboxes in cVisor. 
  *
- * Three classic escape/peeking attempts fail in bVisor:
+ * Three classic escape/peeking attempts fail in cVisor:
  *   1. Host fingerprinting: system identity is virtualized
  *   2. Blocked paths: hardware and system metadata are inaccessible
  *   3. Persistent writes: file modifications are isolated per-sandbox
  */
-import { Sandbox } from "bvisor";
+import { Sandbox } from "cvisor";
 
 async function run(sb: Sandbox, cmd: string): Promise<void> {
   const output = sb.runCmd(cmd);
   const stdout = await output.stdout();
   const stderr = await output.stderr();
-  console.log(`bvisor> ${cmd}`);
+  console.log(`cvisor> ${cmd}`);
   if (stdout) console.log(stdout.trimEnd());
   if (stderr) console.error(stderr.trimEnd());
   console.log();
@@ -22,11 +22,11 @@ const sb = new Sandbox();
 
 // === Attempt 1: Host fingerprinting ===
 // An agent tries to discover which machine it's running on.
-// uname(2) is intercepted: nodename is replaced with "bvisor"
+// uname(2) is intercepted: nodename is replaced with "cvisor"
 // and domainname is cleared — the real hostname never leaks.
 console.log("--- Attempt 1: Host fingerprinting ---");
-await run(sb, "uname -n");  // → "bvisor" (not the real hostname)
-await run(sb, "uname -a");  // real kernel/arch, but nodename is "bvisor"
+await run(sb, "uname -n");  // → "cvisor" (not the real hostname)
+await run(sb, "uname -a");  // real kernel/arch, but nodename is "cvisor"
 
 // === Attempt 2: Blocked system paths ===
 // An agent tries to enumerate network interfaces, read a block device,

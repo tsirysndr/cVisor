@@ -1,0 +1,19 @@
+[package]
+name = "cvisor-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+# Node bindings are only ever cross-built for Linux; on other hosts this crate
+# builds as an empty cdylib so `cargo build` at the workspace root succeeds.
+[target.'cfg(target_os = "linux")'.dependencies]
+napi = { version = "3", features = ["napi8"] }
+napi-derive = "3"
+cvisor-core = { path = "../cvisor-core" }
+
+[target.'cfg(target_os = "linux")'.build-dependencies]
+napi-build = "2"

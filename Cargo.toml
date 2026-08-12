@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/bvisor-core",
-    "crates/bvisor-node",
-    "crates/bvisor-ffi",
+    "crates/cvisor-core",
+    "crates/cvisor-node",
+    "crates/cvisor-ffi",
     "xtask",
 ]
 
@@ -11,7 +11,7 @@ members = [
 version = "0.0.6"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/butter-dot-dev/bVisor"
+repository = "https://github.com/butter-dot-dev/cVisor"
 
 [workspace.dependencies]
 libc = "0.2"

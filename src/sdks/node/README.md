@@ -1,6 +1,6 @@
-# bVisor Node SDK
+# cVisor Node SDK
 
-Node.js bindings for bVisor. Linux only.
+Node.js bindings for cVisor. Linux only.
 
 ## Dev
 
@@ -16,7 +16,7 @@ zig build run-node -Dlog-level=off       # disable supervisor logs (default: deb
 
 For a targeted test, from this directory, run:
 ```bash
-# Install the latest published bvisor and run test.ts in a linux container
+# Install the latest published cvisor and run test.ts in a linux container
 npm run test:published
 ```
 

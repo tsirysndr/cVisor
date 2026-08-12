@@ -3,7 +3,7 @@
 //!   cargo xtask test [--arch aarch64|x86_64]   cross-compile + run tests in Alpine
 //!   cargo xtask run  [--arch aarch64|x86_64]    run the sandbox binary in Alpine (native arch only)
 //!   cargo xtask run-node [--script F] [...]      build .node + run the bun test image
-//!   cargo xtask node-artifacts                   build libbvisor.node for all 4 platforms
+//!   cargo xtask node-artifacts                   build libcvisor.node for all 4 platforms
 //!
 //! Test running itself is wired through `.cargo/config.toml` runner scripts, so
 //! `xtask test` is a thin wrapper over `cargo test --target …-musl`.
@@ -36,7 +36,7 @@ fn run(cmd: &mut Command) -> bool {
 fn cmd_test(args: &[String]) -> bool {
     let arch = parse_arch(args);
     let target = format!("{arch}-unknown-linux-musl");
-    run(Command::new("cargo").args(["test", "-p", "bvisor-core", "--target", &target]))
+    run(Command::new("cargo").args(["test", "-p", "cvisor-core", "--target", &target]))
 }
 
 fn cmd_run(args: &[String]) -> bool {
@@ -50,9 +50,9 @@ fn cmd_run(args: &[String]) -> bool {
     if !run(Command::new("cargo").args([
         "build",
         "-p",
-        "bvisor-core",
+        "cvisor-core",
         "--bin",
-        "bvisor",
+        "cvisor",
         "--bin",
         "smoke",
         "--target",
@@ -61,7 +61,7 @@ fn cmd_run(args: &[String]) -> bool {
     ])) {
         return false;
     }
-    let bvisor = abs(&format!("target/{target}/release/bvisor"));
+    let cvisor = abs(&format!("target/{target}/release/cvisor"));
     let smoke = abs(&format!("target/{target}/release/smoke"));
     // Run the supervisor in Alpine; it execs /smoke as the guest command.
     run(Command::new("docker").args([
@@ -70,11 +70,11 @@ fn cmd_run(args: &[String]) -> bool {
         "--security-opt",
         "seccomp=unconfined",
         "-v",
-        &format!("{bvisor}:/bin/bvisor"),
+        &format!("{cvisor}:/bin/cvisor"),
         "-v",
         &format!("{smoke}:/smoke"),
         "alpine",
-        "/bin/bvisor",
+        "/bin/cvisor",
     ]))
 }
 
@@ -94,7 +94,7 @@ const NODE_TARGETS: &[(&str, &str)] = &[
     ("x86_64-unknown-linux-musl", "linux-x64-musl"),
 ];
 
-/// Build the napi cdylib for one target and copy it as libbvisor.node into the
+/// Build the napi cdylib for one target and copy it as libcvisor.node into the
 /// matching platform package. `target` may carry a `.2.17` glibc suffix.
 fn build_node_one(target: &str, platform_dir: &str) -> bool {
     let is_musl = target.contains("musl");
@@ -102,7 +102,7 @@ fn build_node_one(target: &str, platform_dir: &str) -> bool {
     cmd.args([
         "zigbuild",
         "-p",
-        "bvisor-node",
+        "cvisor-node",
         "--target",
         target,
         "--release",
@@ -116,12 +116,12 @@ fn build_node_one(target: &str, platform_dir: &str) -> bool {
     }
     // zigbuild strips the .2.17 suffix from the output directory.
     let out_target = target.split_once(".2.").map(|(t, _)| t).unwrap_or(target);
-    let so = format!("target/{out_target}/release/libbvisor_node.so");
+    let so = format!("target/{out_target}/release/libcvisor_node.so");
     if !std::path::Path::new(&so).exists() {
         eprintln!("expected {so} to exist");
         return false;
     }
-    let dest = format!("src/sdks/node/platforms/{platform_dir}/libbvisor.node");
+    let dest = format!("src/sdks/node/platforms/{platform_dir}/libcvisor.node");
     match std::fs::copy(&so, &dest) {
         Ok(_) => {
             eprintln!("+ copied {so} -> {dest}");
@@ -134,7 +134,7 @@ fn build_node_one(target: &str, platform_dir: &str) -> bool {
     }
 }
 
-/// Build libbvisor.node for all four Node platform packages.
+/// Build libcvisor.node for all four Node platform packages.
 fn cmd_node_artifacts(_args: &[String]) -> bool {
     NODE_TARGETS
         .iter()
@@ -157,7 +157,7 @@ fn cmd_run_node(args: &[String]) -> bool {
     if !build_node_one(target, dir) {
         return false;
     }
-    if !run(Command::new("docker").args(["build", "-t", "bvisor-node-test", "./src/sdks/node"])) {
+    if !run(Command::new("docker").args(["build", "-t", "cvisor-node-test", "./src/sdks/node"])) {
         return false;
     }
     let script = args
@@ -175,14 +175,14 @@ fn cmd_run_node(args: &[String]) -> bool {
         "./src/sdks/node:/app",
         "-w",
         "/app",
-        "bvisor-node-test",
+        "cvisor-node-test",
         "sh",
         "-c",
         &format!("bun install && bun {script} --log-level OFF"),
     ]))
 }
 
-/// Build the FFI cdylib (libbvisor.so) for the given arch and copy it into the
+/// Build the FFI cdylib (libcvisor.so) for the given arch and copy it into the
 /// FFI SDK native dirs so they can load it.
 fn cmd_ffi(args: &[String]) -> bool {
     let arch = parse_arch(args);
@@ -192,7 +192,7 @@ fn cmd_ffi(args: &[String]) -> bool {
         .args([
             "zigbuild",
             "-p",
-            "bvisor-ffi",
+            "cvisor-ffi",
             "--target",
             &target,
             "--release",
@@ -201,7 +201,7 @@ fn cmd_ffi(args: &[String]) -> bool {
     if !ok {
         return false;
     }
-    let so = format!("target/{target}/release/libbvisor.so");
+    let so = format!("target/{target}/release/libcvisor.so");
     if !std::path::Path::new(&so).exists() {
         eprintln!("expected {so} to exist");
         return false;
@@ -222,7 +222,7 @@ fn cmd_ffi(args: &[String]) -> bool {
         "-c",
         &format!(
             "apk add --no-cache patchelf >/dev/null 2>&1 && \
-             patchelf --replace-needed libc.so {soname} /t/libbvisor.so"
+             patchelf --replace-needed libc.so {soname} /t/libcvisor.so"
         ),
     ]));
     if !patched {
@@ -230,11 +230,11 @@ fn cmd_ffi(args: &[String]) -> bool {
     }
     // Distribute the .so to each FFI SDK's native directory.
     let dests = [
-        format!("src/sdks/python/bvisor/_native/libbvisor-{arch}.so"),
-        format!("src/sdks/bun/native/libbvisor-{arch}.so"),
-        format!("src/sdks/deno/native/libbvisor-{arch}.so"),
-        format!("src/sdks/ruby/native/libbvisor-{arch}.so"),
-        format!("src/sdks/erlang/priv/libbvisor-{arch}.so"),
+        format!("src/sdks/python/cvisor/_native/libcvisor-{arch}.so"),
+        format!("src/sdks/bun/native/libcvisor-{arch}.so"),
+        format!("src/sdks/deno/native/libcvisor-{arch}.so"),
+        format!("src/sdks/ruby/native/libcvisor-{arch}.so"),
+        format!("src/sdks/erlang/priv/libcvisor-{arch}.so"),
     ];
     for dest in dests {
         let p = std::path::Path::new(&dest);
