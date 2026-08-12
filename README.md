@@ -11,6 +11,8 @@ Unlike gVisor, cVisor is built to run directly in your application, spinning up 
 
 **Compatibility**: cVisor currently ships for Linux hosts only, with support for ARM and X86 architectures and glibc/musl ABIs.
 
+> **Note**: cVisor is a fork of [bVisor](https://github.com/butter-dot-dev/bVisor), rewritten in **Rust** (the original is written in Zig).
+
 ## Usage
 
 The cVisor runtime ships wrapped in a Typescript SDK, installed via npm.
