@@ -1,11 +1,15 @@
 Gem::Specification.new do |spec|
   spec.name        = "cvisor"
-  spec.version     = "0.0.6"
+  spec.version     = "0.1.0"
   spec.summary     = "In-process Linux sandbox — Ruby SDK (Fiddle FFI over libcvisor)"
   spec.description = "A thin Fiddle FFI wrapper over the libcvisor C ABI. Linux-only."
   spec.authors     = ["butter.dev"]
-  spec.homepage    = "https://github.com/butter-dot-dev/cVisor"
+  spec.homepage    = "https://github.com/tsirysndr/cVisor"
   spec.license     = "MIT"
+  spec.metadata    = {
+    "homepage_uri"    => "https://github.com/tsirysndr/cVisor",
+    "source_code_uri" => "https://github.com/tsirysndr/cVisor",
+  }
 
   spec.required_ruby_version = ">= 3.0"
   spec.files = Dir["lib/**/*.rb", "bin/*", "native/*.so", "README.md"]

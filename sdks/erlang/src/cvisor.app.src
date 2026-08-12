@@ -7,7 +7,7 @@
   {applications, [kernel, stdlib]},
   {env, []},
   {modules, []},
-  {licenses, ["Apache-2.0"]},
+  {licenses, ["MIT"]},
   {links, [{"GitHub", "https://github.com/tsirysndr/cVisor"}]},
   %% Files shipped in the Hex tarball (rebar3_hex reads this from the app
   %% details, not from rebar.config). The prebuilt libcvisor must go through

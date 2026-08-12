@@ -1,6 +1,6 @@
 [project]
 name = "cvisor"
-version = "0.0.6"
+version = "0.1.0"
 description = "In-process Linux sandbox — Python SDK (ctypes FFI over libcvisor)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -25,8 +25,8 @@ console = ["ipython>=8"]
 cvisor = "cvisor.console:main"
 
 [project.urls]
-Homepage = "https://github.com/butter-dot-dev/cVisor"
-Repository = "https://github.com/butter-dot-dev/cVisor"
+Homepage = "https://github.com/tsirysndr/cVisor"
+Repository = "https://github.com/tsirysndr/cVisor"
 
 [build-system]
 requires = ["hatchling"]

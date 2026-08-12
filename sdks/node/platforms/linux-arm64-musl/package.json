@@ -1,6 +1,14 @@
 {
   "name": "@cvisor/linux-arm64-musl",
-  "version": "0.0.6",
+  "version": "0.1.0",
+  "description": "cvisor native binaries (arm64, musl): libcvisor.node + libcvisor.so",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tsirysndr/cVisor.git",
+    "directory": "sdks/node/platforms/linux-arm64-musl"
+  },
+  "homepage": "https://github.com/tsirysndr/cVisor",
   "os": [
     "linux"
   ],

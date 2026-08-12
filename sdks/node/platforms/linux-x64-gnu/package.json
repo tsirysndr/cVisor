@@ -1,6 +1,14 @@
 {
   "name": "@cvisor/linux-x64-gnu",
-  "version": "0.0.6",
+  "version": "0.1.0",
+  "description": "cvisor native binaries (x64, gnu): libcvisor.node + libcvisor.so",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tsirysndr/cVisor.git",
+    "directory": "sdks/node/platforms/linux-x64-gnu"
+  },
+  "homepage": "https://github.com/tsirysndr/cVisor",
   "os": [
     "linux"
   ],
