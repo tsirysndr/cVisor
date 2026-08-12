@@ -13,6 +13,28 @@ Unlike gVisor, cVisor is built to run directly in your application, spinning up 
 
 > **Note**: cVisor is a fork of [bVisor](https://github.com/butter-dot-dev/bVisor), rewritten in **Rust** (the original is written in Zig).
 
+## Quick try
+
+Drop into a Python REPL with cvisor installed, from any machine with Docker:
+
+```bash
+docker run -it --rm \
+  --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+  ghcr.io/astral-sh/uv:python3.12-alpine \
+  uv run --with cvisor python
+```
+
+```python
+>>> from cvisor import Sandbox
+>>> sb = Sandbox()
+>>> print(sb.run("echo hi; uname -n").stdout)
+hi
+cvisor
+```
+
+The `--security-opt` flags are required: cVisor installs its own seccomp
+filter, which Docker's default profiles block.
+
 ## Usage
 
 The cVisor runtime ships wrapped in a Typescript SDK, installed via npm.
@@ -43,7 +65,8 @@ Unsafe commands are blocked:
 sb.runCmd("chroot /tmp"); // error
 ```
 
-Python SDK and CLI are also planned.
+Python, Ruby, Erlang, Bun, and Deno SDKs are also published — see
+[sdks/README.md](sdks/README.md).
 
 ## Examples
 

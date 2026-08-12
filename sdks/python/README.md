@@ -2,6 +2,29 @@
 
 A `ctypes` FFI wrapper over the `libcvisor` C ABI. Linux-only.
 
+## Quick try (Docker)
+
+Drop into a Python REPL with cvisor installed, from any machine with Docker:
+
+```bash
+docker run -it --rm \
+  --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+  ghcr.io/astral-sh/uv:python3.12-alpine \
+  uv run --with cvisor python
+```
+
+```python
+>>> from cvisor import Sandbox
+>>> sb = Sandbox()
+>>> print(sb.run("echo hi; uname -n").stdout)
+hi
+cvisor
+```
+
+The `--security-opt` flags are required: cVisor installs its own seccomp
+filter, which Docker's default profiles block. An Alpine (musl) image is
+needed — the published wheels are `musllinux`-tagged.
+
 ## Install (uv)
 
 ```bash
