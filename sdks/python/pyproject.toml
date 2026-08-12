@@ -32,13 +32,24 @@ Repository = "https://github.com/tsirysndr/cVisor"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# The compiled libcvisor-<arch>.so is placed in cvisor/_native/ by the build
+# step (`cargo xtask ffi`). The directory is gitignored, and hatchling drops
+# VCS-ignored files unless they are declared as artifacts — without this the
+# sdist omits the .so and building a wheel from it fails.
+[tool.hatch.build.targets.sdist]
+artifacts = ["cvisor/_native/*.so"]
+
+# The wheel's .so selection and platform tag are handled by hatch_build.py:
+# CVISOR_ARCH=aarch64|x86_64 builds a musllinux wheel with that arch's .so;
+# unset, it builds a fat py3-none-any wheel with both (dev convenience).
+# _native is excluded here so inclusion doesn't depend on gitignore state
+# (present in the worktree, absent inside an unpacked sdist).
 [tool.hatch.build.targets.wheel]
 packages = ["cvisor"]
+exclude = ["cvisor/_native"]
 
-# The compiled libcvisor.so is placed in cvisor/_native/ by the build step
-# (`cargo xtask ffi`) and shipped inside the wheel.
-[tool.hatch.build.targets.wheel.force-include]
-"cvisor/_native" = "cvisor/_native"
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
 
 [dependency-groups]
 dev = ["pytest>=8"]
