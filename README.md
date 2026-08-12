@@ -1,4 +1,5 @@
 ### cVisor - Embedded Bash Sandbox for Agents
+[![CI](https://github.com/tsirysndr/bVisor/actions/workflows/ci.yml/badge.svg)](https://github.com/tsirysndr/bVisor/actions/workflows/ci.yml)
 
 cVisor is an SDK and runtime for safely executing bash commands locally, without the need for remote sandboxes or local VMs/containers. 
 
