@@ -15,17 +15,33 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub struct ProcData {
     pub content: Vec<u8>,
     pub is_dir: bool,
+    /// Synthetic inode. Non-zero and distinct per rendered file so tools that
+    /// guard against reading a file into itself (e.g. GNU grep's `same_file`
+    /// check against stdout) don't mistake a /proc file for their output.
+    ino: u64,
     offset: AtomicUsize,
 }
 
 impl ProcData {
     pub fn new(content: Vec<u8>, is_dir: bool) -> ProcData {
         ProcData {
+            ino: synthetic_ino(&content, is_dir),
             content,
             is_dir,
             offset: AtomicUsize::new(0),
         }
     }
+}
+
+/// FNV-1a hash of the rendered content, forced non-zero, so distinct /proc
+/// files get distinct inodes (dirs and files with equal bodies are mixed apart).
+fn synthetic_ino(content: &[u8], is_dir: bool) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in content {
+        h = (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h = (h ^ if is_dir { 1 } else { 2 }).wrapping_mul(0x0000_0100_0000_01b3);
+    h | 1
 }
 
 /// Which backend serves an open file, and the kernel fd(s) behind it.
@@ -92,7 +108,7 @@ impl Backend {
 
     pub fn statx(&self) -> SysResult<sys::Statx> {
         if let Backend::Proc(p) = self {
-            return Ok(synthetic_statx(p.is_dir, p.content.len() as u64));
+            return Ok(synthetic_statx(p.is_dir, p.content.len() as u64, p.ino));
         }
         sys::statx_fd(self.backing_fd().unwrap())
     }
@@ -236,12 +252,17 @@ fn last_errno() -> SysError {
 /// Build a synthetic `statx` for a proc file/dir: dirs are `S_IFDIR|0555`,
 /// files `S_IFREG|0444`, with mode/nlink/size masked in so statx_to_stat picks
 /// them up.
-fn synthetic_statx(is_dir: bool, size: u64) -> sys::Statx {
+fn synthetic_statx(is_dir: bool, size: u64, ino: u64) -> sys::Statx {
     use sys::statx_mask as m;
     // SAFETY: all-zero is a valid bit pattern for this POD struct.
     let mut sx: sys::Statx = unsafe { std::mem::zeroed() };
-    sx.stx_mask = (m::MODE | m::NLINK | m::SIZE) as u32;
+    sx.stx_mask = (m::MODE | m::NLINK | m::SIZE | m::INO) as u32;
     sx.stx_blksize = 4096;
+    sx.stx_ino = ino;
+    // A synthetic device id for the cvisor /proc view — non-zero and unlike any
+    // real filesystem/pipe device, so (dev, ino) never collides with a real fd.
+    sx.stx_dev_major = 0;
+    sx.stx_dev_minor = 0x63; // 'c'
     if is_dir {
         sx.stx_mode = (libc::S_IFDIR | 0o555) as u16;
         sx.stx_nlink = 2;
@@ -579,4 +600,30 @@ fn copy_file(src: &str, dst: &str) -> SysResult<()> {
     sys::close(in_fd);
     sys::close(out_fd);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A synthetic /proc file must report a non-zero, distinct (dev, ino).
+    // Zero/zero collided with what GNU grep sees for its stdout, tripping its
+    // "input file is also the output" self-loop guard so it refused to read.
+    #[test]
+    fn proc_statx_has_nonzero_distinct_identity() {
+        let status = proc_open(b"Name:\tcvisor-guest\nPid:\t7\n".to_vec(), false)
+            .statx()
+            .unwrap();
+        assert_ne!(status.stx_ino, 0);
+        assert_ne!(status.stx_dev_minor, 0);
+        assert_ne!(status.stx_mask & sys::statx_mask::INO as u32, 0);
+
+        // Different content ⇒ different inode; a dir differs from a file.
+        let other = proc_open(b"Name:\tcvisor-guest\nPid:\t8\n".to_vec(), false)
+            .statx()
+            .unwrap();
+        let dir = proc_open(Vec::new(), true).statx().unwrap();
+        assert_ne!(status.stx_ino, other.stx_ino);
+        assert_ne!(status.stx_ino, dir.stx_ino);
+    }
 }

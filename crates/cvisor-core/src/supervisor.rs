@@ -203,6 +203,8 @@ impl Supervisor {
             self.sys_sysinfo(notif)
         } else if nr == NEWFSTATAT_NR {
             self.sys_fstatat(notif)
+        } else if nr == libc::SYS_statx {
+            self.sys_statx(notif)
         } else if nr == libc::SYS_faccessat {
             self.sys_faccessat(notif)
         } else if nr == libc::SYS_getdents64 {
@@ -907,6 +909,71 @@ impl Supervisor {
         drop(state);
         let st = crate::virt::fs::file::statx_to_stat(&sx);
         self.mem.write_val(caller, stat_addr, &st)?;
+        Ok(notif::reply_success(notif.id, 0))
+    }
+
+    /// statx: like fstatat, but writes a `struct statx` (256 bytes). glibc
+    /// implements the whole stat family through statx, so this is essential for
+    /// glibc guests — especially for synthetic /proc files, which have no
+    /// backing kernel fd for a continued statx to hit.
+    /// statx(dirfd, pathname, flags, mask, statxbuf)
+    fn sys_statx(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
+        use crate::error::{Errno, SysError};
+        let caller = notif.pid as i32;
+        let dirfd = notif.data.args[0] as i64 as i32;
+        let path_ptr = notif.data.args[1];
+        let flags = notif.data.args[2] as i32;
+        // args[3] is the requested mask; we always fill BASIC_STATS and report
+        // what is populated via the returned stx_mask.
+        let statx_addr = notif.data.args[4];
+
+        // AT_EMPTY_PATH + empty path ≡ fstat(dirfd).
+        let mut pbuf = [0u8; 256];
+        let raw = self
+            .mem
+            .read_string(caller, path_ptr, &mut pbuf)
+            .unwrap_or(b"");
+        if flags & libc::AT_EMPTY_PATH != 0 && raw.is_empty() {
+            if dirfd == 0 || dirfd == 1 || dirfd == 2 {
+                return Ok(notif::reply_continue(notif.id));
+            }
+            let Some(file) = self.caller_fd(caller, dirfd) else {
+                return Ok(notif::reply_continue(notif.id));
+            };
+            let sx = file.statx()?;
+            self.mem.write_val(caller, statx_addr, &sx)?;
+            return Ok(notif::reply_success(notif.id, 0));
+        }
+        let path = std::str::from_utf8(raw).map_err(|_| SysError(Errno::INVAL))?;
+        if path.is_empty() {
+            return Err(SysError(Errno::INVAL));
+        }
+
+        let mut state = self.state.lock().unwrap();
+        let procinfo = &*self.procinfo;
+        let route = state.resolve_path(caller, path, dirfd, procinfo)?;
+        let (btype, normalized) = match route {
+            ResolvedRoute::Block => return Err(SysError(Errno::NOENT)),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
+        };
+        if matches!(btype, BackendType::Cow | BackendType::Tmp)
+            && (state.tombstones.is_tombstoned(&normalized)
+                || state.tombstones.is_ancestor_tombstoned(&normalized))
+        {
+            return Err(SysError(Errno::NOENT));
+        }
+        let sx = if btype == BackendType::Proc {
+            state.threads.sync_new_threads(procinfo);
+            let (content, is_dir) = self.build_proc(&mut state, caller, &normalized)?;
+            backend::proc_open(content, is_dir).statx()?
+        } else {
+            Self::statx_routed(&state.overlay, btype, &normalized)?
+        };
+        drop(state);
+        self.mem.write_val(caller, statx_addr, &sx)?;
         Ok(notif::reply_success(notif.id, 0))
     }
 
