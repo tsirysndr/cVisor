@@ -261,6 +261,59 @@ impl Supervisor {
             self.sys_execve(notif)
         } else if nr == libc::SYS_clone || CLONE3_NR == Some(nr) {
             self.sys_clone(notif)
+        } else if Some(nr) == legacy::FORK || Some(nr) == legacy::VFORK {
+            // x86_64 fork/vfork: snapshot the fd table at fork time (as for clone).
+            self.sys_clone(notif)
+        } else if Some(nr) == legacy::OPEN {
+            // open(path, flags, mode) -> openat(AT_FDCWD, path, flags, mode)
+            let a = notif.data.args;
+            self.sys_openat(&remap(notif, [AT_FDCWD_U64, a[0], a[1], a[2], 0, 0]))
+        } else if Some(nr) == legacy::CREAT {
+            // creat(path, mode) -> openat(AT_FDCWD, path, O_WRONLY|O_CREAT|O_TRUNC, mode)
+            let a = notif.data.args;
+            let flags = (libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC) as u64;
+            self.sys_openat(&remap(notif, [AT_FDCWD_U64, a[0], flags, a[1], 0, 0]))
+        } else if Some(nr) == legacy::STAT {
+            // stat(path, buf) -> newfstatat(AT_FDCWD, path, buf, 0)
+            let a = notif.data.args;
+            self.sys_fstatat(&remap(notif, [AT_FDCWD_U64, a[0], a[1], 0, 0, 0]))
+        } else if Some(nr) == legacy::LSTAT {
+            // lstat(path, buf) -> newfstatat(AT_FDCWD, path, buf, AT_SYMLINK_NOFOLLOW)
+            let a = notif.data.args;
+            let f = libc::AT_SYMLINK_NOFOLLOW as u64;
+            self.sys_fstatat(&remap(notif, [AT_FDCWD_U64, a[0], a[1], f, 0, 0]))
+        } else if Some(nr) == legacy::ACCESS {
+            // access(path, mode) -> faccessat(AT_FDCWD, path, mode)
+            let a = notif.data.args;
+            self.sys_faccessat(&remap(notif, [AT_FDCWD_U64, a[0], a[1], 0, 0, 0]))
+        } else if Some(nr) == legacy::MKDIR {
+            // mkdir(path, mode) -> mkdirat(AT_FDCWD, path, mode)
+            let a = notif.data.args;
+            self.sys_mkdirat(&remap(notif, [AT_FDCWD_U64, a[0], a[1], 0, 0, 0]))
+        } else if Some(nr) == legacy::RMDIR {
+            // rmdir(path) -> unlinkat(AT_FDCWD, path, AT_REMOVEDIR)
+            let a = notif.data.args;
+            self.sys_unlinkat(&remap(notif, [AT_FDCWD_U64, a[0], libc::AT_REMOVEDIR as u64, 0, 0, 0]))
+        } else if Some(nr) == legacy::UNLINK {
+            // unlink(path) -> unlinkat(AT_FDCWD, path, 0)
+            let a = notif.data.args;
+            self.sys_unlinkat(&remap(notif, [AT_FDCWD_U64, a[0], 0, 0, 0, 0]))
+        } else if Some(nr) == legacy::READLINK {
+            // readlink(path, buf, sz) -> readlinkat(AT_FDCWD, path, buf, sz)
+            let a = notif.data.args;
+            self.sys_readlinkat(&remap(notif, [AT_FDCWD_U64, a[0], a[1], a[2], 0, 0]))
+        } else if Some(nr) == legacy::SYMLINK {
+            // symlink(target, link) -> symlinkat(target, AT_FDCWD, link)
+            let a = notif.data.args;
+            self.sys_symlinkat(&remap(notif, [a[0], AT_FDCWD_U64, a[1], 0, 0, 0]))
+        } else if Some(nr) == legacy::CHMOD {
+            // chmod(path, mode) -> fchmodat(AT_FDCWD, path, mode, 0)
+            let a = notif.data.args;
+            self.sys_fchmodat(&remap(notif, [AT_FDCWD_U64, a[0], a[1], 0, 0, 0]))
+        } else if Some(nr) == legacy::PIPE {
+            // pipe(fds) -> pipe2(fds, 0)
+            let a = notif.data.args;
+            self.sys_pipe2(&remap(notif, [a[0], 0, 0, 0, 0, 0]))
         } else if is_blocked_eperm(nr) {
             // Inbound networking: outbound-only sandbox.
             Ok(notif::reply_error(
@@ -1830,8 +1883,55 @@ const CLONE3_NR: Option<i64> = Some(libc::SYS_clone3);
 // The path-based stat syscall (fstatat64/newfstatat).
 const NEWFSTATAT_NR: i64 = libc::SYS_newfstatat;
 
+/// `AT_FDCWD` as the u64 bit pattern the handlers decode back to i32.
+const AT_FDCWD_U64: u64 = libc::AT_FDCWD as i64 as u64;
+
+/// Legacy syscalls that exist on x86_64 but not on aarch64 (which has only the
+/// `*at` / modern variants). musl on x86_64 issues these directly — `open`,
+/// `fork`, `stat`, `mkdir`, etc. — so we map each to the same handler used for
+/// its modern counterpart, giving identical behavior across architectures.
+/// Each is `Some(nr)` on x86_64 and `None` elsewhere so the dispatch arms are
+/// no-ops on arches that lack the syscall.
+mod legacy {
+    #[cfg(target_arch = "x86_64")]
+    macro_rules! nr {
+        ($s:ident) => {
+            Some(libc::$s)
+        };
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    macro_rules! nr {
+        ($s:ident) => {
+            None
+        };
+    }
+
+    pub const OPEN: Option<i64> = nr!(SYS_open);
+    pub const CREAT: Option<i64> = nr!(SYS_creat);
+    pub const FORK: Option<i64> = nr!(SYS_fork);
+    pub const VFORK: Option<i64> = nr!(SYS_vfork);
+    pub const STAT: Option<i64> = nr!(SYS_stat);
+    pub const LSTAT: Option<i64> = nr!(SYS_lstat);
+    pub const ACCESS: Option<i64> = nr!(SYS_access);
+    pub const MKDIR: Option<i64> = nr!(SYS_mkdir);
+    pub const RMDIR: Option<i64> = nr!(SYS_rmdir);
+    pub const UNLINK: Option<i64> = nr!(SYS_unlink);
+    pub const READLINK: Option<i64> = nr!(SYS_readlink);
+    pub const SYMLINK: Option<i64> = nr!(SYS_symlink);
+    pub const CHMOD: Option<i64> = nr!(SYS_chmod);
+    pub const PIPE: Option<i64> = nr!(SYS_pipe);
+}
+
 fn errno_now() -> i32 {
     nix::errno::Errno::last() as i32
+}
+
+/// Copy a notification with rewritten arguments, so a legacy syscall can be
+/// dispatched to the handler for its modern `*at` equivalent.
+fn remap(notif: &SeccompNotif, args: [u64; 6]) -> SeccompNotif {
+    let mut n = *notif;
+    n.data.args = args;
+    n
 }
 
 /// Inbound-networking syscalls: blocked with EPERM (outbound-only sandbox).

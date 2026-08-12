@@ -14,8 +14,18 @@ env:
 
 jobs:
   test:
-    name: unit + e2e (Alpine, seccomp)
-    runs-on: ubuntu-latest
+    name: unit + e2e (${{ matrix.arch }}, Alpine, seccomp)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            target: aarch64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
 
@@ -23,22 +33,23 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.arch }}
 
       - name: Format check
         run: cargo fmt --all -- --check
 
-      - name: Clippy (core, musl target)
-        run: cargo clippy -p cvisor-core --target x86_64-unknown-linux-musl --tests -- -D warnings
+      - name: Clippy (core, ${{ matrix.arch }} target)
+        run: cargo clippy -p cvisor-core --target ${{ matrix.target }} --tests -- -D warnings
 
       # cVisor installs its own seccomp filter, so the tests must run in a
       # container with the default seccomp profile disabled. `cargo xtask test`
       # cross-compiles static musl binaries and runs each — unit tests and the
       # real-command e2e suite (tests/passthrough.rs) — inside Alpine via
-      # `docker run --security-opt seccomp=unconfined`. The ubuntu-latest runner
-      # is x86_64 with Docker preinstalled, so `--platform linux/amd64` is
-      # native (no emulation).
+      # `docker run --security-opt seccomp=unconfined`. Each runner is native
+      # for its arch, so there is no emulation.
       - name: Unit + e2e tests
-        run: cargo xtask test --arch x86_64
+        run: cargo xtask test --arch ${{ matrix.arch }}
