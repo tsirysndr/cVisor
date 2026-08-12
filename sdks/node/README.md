@@ -1,13 +1,23 @@
-# cVisor — Node SDK
+# cVisor — Node / Bun / Deno SDK
 
-Node.js bindings for cVisor via a native N-API module (`libcvisor.node`).
+One npm package for all three JS runtimes. Under Node it binds via a native
+N-API module (`libcvisor.node`); under Bun and Deno the package's `"bun"` and
+`"deno"` export conditions select FFI entries (`bun:ffi` / `Deno.dlopen`) over
+`libcvisor.so`. All entries expose the same `Sandbox` / `sh` / `Output` API.
 Linux only (ARM & x86, glibc & musl).
 
 ## Install
 
 ```bash
-npm install cvisor
+npm install cvisor        # Node
+bun add cvisor            # Bun
+deno add npm:cvisor       # Deno (run with --allow-ffi)
 ```
+
+Under Deno the sandbox needs FFI permission: `deno run --allow-ffi ...`
+(plus `--allow-env` if you use the `CVISOR_LIB` override). The runtime is
+picked automatically; `cvisor/bun` and `cvisor/deno` are also exposed as
+explicit subpaths.
 
 ## Usage
 
@@ -56,10 +66,13 @@ cargo xtask run-node --script examples/hello-world.ts
 cargo xtask node-artifacts           # build libcvisor.node for all 4 platform packages
 ```
 
-`libcvisor.node` is produced per platform into `platforms/linux-<arch>-<libc>/`.
-The TypeScript loader (`src/native.ts`) resolves the right one at runtime via
-`detect-libc`. On macOS, `npm install` skips the platform packages (`os`/`cpu`
-filtering), so use the Docker flow above.
+`libcvisor.node` and `libcvisor.so` are produced per platform into
+`platforms/linux-<arch>-<libc>/`. The napi loader (`src/native.ts`) and the
+FFI loader (`src/libpath.ts`) resolve the right one at runtime via
+`detect-libc`; `CVISOR_LIB` overrides the `.so` path. On macOS, `npm install`
+skips the platform packages (`os`/`cpu` filtering), so use the Docker flow
+above. The Bun/Deno e2e tests are `test-bun.ts` / `test-deno.ts` (run by CI in
+Alpine containers with `CVISOR_LIB` set).
 
 ## Publishing
 

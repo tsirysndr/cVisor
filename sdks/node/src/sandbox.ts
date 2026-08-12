@@ -1,5 +1,8 @@
 import { External } from "./napi";
 import { native } from "./native";
+import { buildCommand, createOutput, Output } from "./output";
+
+export type { Output } from "./output";
 
 class Stream {
   private ptr: External<"Stream">;
@@ -52,15 +55,6 @@ export class Sandbox {
   }
 }
 
-/** Reconstruct the command string from a tagged template's parts and values. */
-function buildCommand(strings: TemplateStringsArray, values: unknown[]): string {
-  let command = strings[0];
-  for (let i = 0; i < values.length; i++) {
-    command += String(values[i]) + strings[i + 1];
-  }
-  return command;
-}
-
 let defaultSandbox: Sandbox | undefined;
 
 /**
@@ -74,23 +68,4 @@ let defaultSandbox: Sandbox | undefined;
 export function sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
   defaultSandbox ??= new Sandbox();
   return defaultSandbox.sh(strings, ...values);
-}
-
-export interface Output {
-  stdoutStream: ReadableStream<Uint8Array>;
-  stderrStream: ReadableStream<Uint8Array>;
-  stdout: () => Promise<string>;
-  stderr: () => Promise<string>;
-}
-
-function createOutput(
-  stdoutStream: ReadableStream<Uint8Array>,
-  stderrStream: ReadableStream<Uint8Array>,
-): Output {
-  return {
-    stdoutStream,
-    stderrStream,
-    stdout: () => new Response(stdoutStream).text(),
-    stderr: () => new Response(stderrStream).text(),
-  };
 }

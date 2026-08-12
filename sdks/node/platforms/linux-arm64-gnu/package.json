@@ -12,6 +12,7 @@
   ],
   "main": "libcvisor.node",
   "files": [
-    "libcvisor.node"
+    "libcvisor.node",
+    "libcvisor.so"
   ]
 }

@@ -5,11 +5,17 @@ cVisor ships one **native runtime** and several thin language SDKs that wrap it.
 | SDK    | Mechanism                                     | Entry point          |
 | ------ | --------------------------------------------- | -------------------- |
 | Node   | N-API native module (`libcvisor.node`)        | `node/`              |
-| Bun    | Bun FFI (`bun:ffi`) over `libcvisor.so`       | `bun/index.ts`       |
-| Deno   | Deno FFI (`Deno.dlopen`) over `libcvisor.so`  | `deno/mod.ts`        |
+| Bun    | Bun FFI (`bun:ffi`) over `libcvisor.so`       | `node/src/bun.ts`    |
+| Deno   | Deno FFI (`Deno.dlopen`) over `libcvisor.so`  | `node/src/deno.ts`   |
 | Python | `ctypes` FFI over `libcvisor.so` (uv project) | `python/`            |
 | Ruby   | `fiddle` FFI over `libcvisor.so`              | `ruby/lib/cvisor.rb` |
 | Erlang | NIF bridging to `libcvisor.so`                | `erlang/`            |
+
+Node, Bun, and Deno all install the same `cvisor` npm package: its `exports`
+map picks the napi entry under Node and the FFI entries under Bun (`"bun"`
+condition) and Deno (`"deno"` condition), all exposing the same
+`Sandbox` / `sh` / `Output` API. The FFI entries load `libcvisor.so` from the
+`@cvisor/linux-*` platform packages (or `CVISOR_LIB`).
 
 ## The shared C ABI
 
@@ -48,9 +54,9 @@ from cvisor import Sandbox
 print(Sandbox().run("echo hi").stdout)          # "hi\n"
 ```
 ```ts
-// Bun / Deno
-import { Sandbox } from "./index.ts";           // or ./mod.ts for Deno
-console.log(new Sandbox().run("echo hi").stdout);
+// Node / Bun (bun add cvisor) / Deno (deno add npm:cvisor)
+import { Sandbox } from "cvisor";
+console.log(await new Sandbox().runCmd("echo hi").stdout());
 ```
 ```ruby
 # Ruby

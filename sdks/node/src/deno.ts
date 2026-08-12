@@ -1,17 +1,15 @@
-// cVisor Deno SDK — Deno FFI (Deno.dlopen) wrapper over the libcvisor C ABI.
-//
-//   import { Sandbox } from "./mod.ts";
-//   const out = new Sandbox().run("echo hello");
-//   console.log(out.stdout); // "hello\n"
-//
-// Run with: deno run --allow-ffi --allow-env mod.ts   (Deno 2+; FFI is stable)
+// Deno entry point (the "deno" export condition): a Deno.dlopen wrapper over
+// the libcvisor C ABI, exposing the same API as the napi entry (index.ts).
+// Needs --allow-ffi (plus --allow-env for the CVISOR_LIB override).
 
-function libraryPath(): string {
-  const override = Deno.env.get("CVISOR_LIB");
-  if (override) return override;
-  const a = Deno.build.arch === "aarch64" ? "aarch64" : "x86_64";
-  return new URL(`./native/libcvisor-${a}.so`, import.meta.url).pathname;
-}
+import { libraryPath } from "./libpath";
+import { buildCommand, bytesToStream, createOutput, Output } from "./output";
+
+export type { Output } from "./output";
+
+// This package compiles without Deno's type definitions; the entry only ever
+// executes under Deno, where the global is present.
+declare const Deno: any;
 
 const lib = Deno.dlopen(libraryPath(), {
   cvisor_sandbox_new: { parameters: [], result: "pointer" },
@@ -27,16 +25,10 @@ const lib = Deno.dlopen(libraryPath(), {
   cvisor_bytes_free: { parameters: ["pointer", "usize"], result: "void" },
 });
 
-export interface Output {
-  stdout: string;
-  stderr: string;
-  stdoutBytes: Uint8Array;
-  stderrBytes: Uint8Array;
-}
+type Pointer = unknown;
+type Accessor = (o: Pointer, lenBuf: Uint8Array) => Pointer;
 
-type Accessor = (o: Deno.PointerValue, lenBuf: Uint8Array) => Deno.PointerValue;
-
-function readOutput(out: Deno.PointerValue, accessor: Accessor): Uint8Array {
+function readOutput(out: Pointer, accessor: Accessor): Uint8Array {
   const lenBuf = new Uint8Array(8);
   const p = accessor(out, lenBuf);
   const n = Number(new DataView(lenBuf.buffer).getBigUint64(0, true));
@@ -49,7 +41,7 @@ function readOutput(out: Deno.PointerValue, accessor: Accessor): Uint8Array {
 }
 
 export class Sandbox {
-  #ptr: Deno.PointerValue;
+  #ptr: Pointer;
 
   constructor() {
     this.#ptr = lib.symbols.cvisor_sandbox_new();
@@ -60,20 +52,16 @@ export class Sandbox {
     lib.symbols.cvisor_sandbox_set_log_level(this.#ptr, level === "DEBUG" ? 1 : 0);
   }
 
-  run(command: string): Output {
+  /** Run a command to completion; the returned Output's streams replay the
+   * captured bytes so the shape matches the napi entry. */
+  runCmd(command: string): Output {
     const cmd = new TextEncoder().encode(command + "\0");
     const out = lib.symbols.cvisor_run(this.#ptr, cmd);
     if (out === null) throw new Error("sandbox run failed");
     try {
       const stdoutBytes = readOutput(out, lib.symbols.cvisor_output_stdout);
       const stderrBytes = readOutput(out, lib.symbols.cvisor_output_stderr);
-      const dec = new TextDecoder();
-      return {
-        stdoutBytes,
-        stderrBytes,
-        stdout: dec.decode(stdoutBytes),
-        stderr: dec.decode(stderrBytes),
-      };
+      return createOutput(bytesToStream(stdoutBytes), bytesToStream(stderrBytes));
     } finally {
       lib.symbols.cvisor_output_free(out);
     }
@@ -81,7 +69,7 @@ export class Sandbox {
 
   /** Tagged-template command runner: `sb.sh\`ls -l ${dir}\``. */
   sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
-    return this.run(buildCommand(strings, values));
+    return this.runCmd(buildCommand(strings, values));
   }
 
   close(): void {
@@ -92,22 +80,13 @@ export class Sandbox {
   }
 }
 
-/** Reconstruct the command string from a tagged template's parts and values. */
-function buildCommand(strings: TemplateStringsArray, values: unknown[]): string {
-  let command = strings[0];
-  for (let i = 0; i < values.length; i++) {
-    command += String(values[i]) + strings[i + 1];
-  }
-  return command;
-}
-
 let defaultSandbox: Sandbox | undefined;
 
 /**
  * Run a command in a shared, lazily-created sandbox via a tagged template:
  *
- *   import { sh } from "./mod.ts";
- *   console.log(sh`ls -l`.stdout);
+ *   import { sh } from "cvisor";
+ *   const files = await sh`ls -l`.stdout();
  */
 export function sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
   defaultSandbox ??= new Sandbox();

@@ -111,22 +111,27 @@ jobs:
             -v "$PWD/sdks/ruby:/sdk" -w /sdk \
             ruby:alpine ruby test/test_sandbox.rb
 
-      - name: Bun SDK (bun:ffi)
+      # The Bun and Deno entries live in the Node package (cvisor's "bun" and
+      # "deno" export conditions) and load libcvisor.so from the platform
+      # packages; xtask ffi drops the musl build there (npm arch naming).
+      - name: Bun SDK (bun:ffi entry of the Node package)
         run: |
+          NPM_ARCH=$([ "${{ matrix.arch }}" = "aarch64" ] && echo arm64 || echo x64)
           docker run --rm \
             --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
-            -e CVISOR_LIB=/sdk/native/libcvisor-${{ matrix.arch }}.so \
-            -v "$PWD/sdks/bun:/sdk" -w /sdk \
-            oven/bun:alpine bun test.ts
+            -e CVISOR_LIB=/sdk/platforms/linux-${NPM_ARCH}-musl/libcvisor.so \
+            -v "$PWD/sdks/node:/sdk" -w /sdk \
+            oven/bun:alpine bun test-bun.ts
 
-      - name: Deno SDK (Deno.dlopen)
+      - name: Deno SDK (Deno.dlopen entry of the Node package)
         run: |
+          NPM_ARCH=$([ "${{ matrix.arch }}" = "aarch64" ] && echo arm64 || echo x64)
           docker run --rm \
             --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
-            -e CVISOR_LIB=/sdk/native/libcvisor-${{ matrix.arch }}.so \
-            -v "$PWD/sdks/deno:/sdk" -w /sdk \
+            -e CVISOR_LIB=/sdk/platforms/linux-${NPM_ARCH}-musl/libcvisor.so \
+            -v "$PWD/sdks/node:/sdk" -w /sdk \
             --entrypoint sh denoland/deno:alpine \
-            -c 'deno run --allow-ffi --allow-env test.ts'
+            -c 'deno run --allow-ffi --allow-env --unstable-sloppy-imports test-deno.ts'
 
       - name: Erlang SDK (NIF)
         run: |

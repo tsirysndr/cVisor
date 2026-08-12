@@ -1,5 +1,7 @@
 // @ts-nocheck
-import { Sandbox, sh } from "cvisor";
+// napi e2e: import the napi entry explicitly — a bare "cvisor" import under
+// Bun resolves the "bun" export condition to the FFI entry instead.
+import { Sandbox, sh } from "./index";
 
 const isInteractive = Bun.argv.includes("--interactive");
 const logLevelIndex = Bun.argv.indexOf("--log-level");

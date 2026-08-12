@@ -2,8 +2,8 @@
 //!
 //!   cargo xtask test [--arch aarch64|x86_64]   cross-compile + run tests in Alpine
 //!   cargo xtask run  [--arch aarch64|x86_64]    run the sandbox binary in Alpine (native arch only)
-//!   cargo xtask run-node [--script F] [...]      build .node + run the bun test image
-//!   cargo xtask node-artifacts                   build libcvisor.node for all 4 platforms
+//!   cargo xtask run-node [--script F] [...]      build .node/.so + run the bun test image
+//!   cargo xtask node-artifacts                   build libcvisor.node + libcvisor.so for all 4 platforms
 //!
 //! Test running itself is wired through `.cargo/config.toml` runner scripts, so
 //! `xtask test` is a thin wrapper over `cargo test --target …-musl`.
@@ -97,17 +97,38 @@ const NODE_TARGETS: &[(&str, &str)] = &[
 /// Build the napi cdylib for one target and copy it as libcvisor.node into the
 /// matching platform package. `target` may carry a `.2.17` glibc suffix.
 fn build_node_one(target: &str, platform_dir: &str) -> bool {
-    let is_musl = target.contains("musl");
+    build_platform_cdylib(target, "cvisor-node", "libcvisor_node.so", |so| {
+        copy_artifact(
+            so,
+            &format!("sdks/node/platforms/{platform_dir}/libcvisor.node"),
+        )
+    })
+}
+
+/// Build the C-ABI cdylib for one target and copy it as libcvisor.so into the
+/// matching platform package (loaded by the Bun/Deno FFI entries).
+fn build_ffi_one(target: &str, platform_dir: &str) -> bool {
+    build_platform_cdylib(target, "cvisor-ffi", "libcvisor.so", |so| {
+        if target.contains("musl") && !patch_musl_needed(so, target) {
+            eprintln!("warning: patchelf step failed; .so may not load on minimal musl images");
+        }
+        copy_artifact(
+            so,
+            &format!("sdks/node/platforms/{platform_dir}/libcvisor.so"),
+        )
+    })
+}
+
+/// zigbuild `package` for `target` and hand the built artifact to `dispatch`.
+fn build_platform_cdylib(
+    target: &str,
+    package: &str,
+    artifact: &str,
+    dispatch: impl FnOnce(&str) -> bool,
+) -> bool {
     let mut cmd = Command::new("cargo");
-    cmd.args([
-        "zigbuild",
-        "-p",
-        "cvisor-node",
-        "--target",
-        target,
-        "--release",
-    ]);
-    if is_musl {
+    cmd.args(["zigbuild", "-p", package, "--target", target, "--release"]);
+    if target.contains("musl") {
         // Dynamic musl cdylib.
         cmd.env("RUSTFLAGS", "-C target-feature=-crt-static");
     }
@@ -116,15 +137,18 @@ fn build_node_one(target: &str, platform_dir: &str) -> bool {
     }
     // zigbuild strips the .2.17 suffix from the output directory.
     let out_target = target.split_once(".2.").map(|(t, _)| t).unwrap_or(target);
-    let so = format!("target/{out_target}/release/libcvisor_node.so");
+    let so = format!("target/{out_target}/release/{artifact}");
     if !std::path::Path::new(&so).exists() {
         eprintln!("expected {so} to exist");
         return false;
     }
-    let dest = format!("sdks/node/platforms/{platform_dir}/libcvisor.node");
-    match std::fs::copy(&so, &dest) {
+    dispatch(&so)
+}
+
+fn copy_artifact(src: &str, dest: &str) -> bool {
+    match std::fs::copy(src, dest) {
         Ok(_) => {
-            eprintln!("+ copied {so} -> {dest}");
+            eprintln!("+ copied {src} -> {dest}");
             true
         }
         Err(e) => {
@@ -134,11 +158,44 @@ fn build_node_one(target: &str, platform_dir: &str) -> bool {
     }
 }
 
-/// Build libcvisor.node for all four Node platform packages.
+/// The dynamic musl cdylib NEEDs the bare `libc.so`, which only exists with
+/// musl-dev. Repoint it at the musl runtime soname present on every musl
+/// image so the .so loads on minimal runtimes (e.g. deno:alpine). Run
+/// patchelf inside an Alpine container so it isn't a host dependency.
+fn patch_musl_needed(so: &str, target: &str) -> bool {
+    let arch = target.split('-').next().unwrap_or("aarch64");
+    let soname = format!("libc.musl-{arch}.so.1");
+    let so_abs = abs(so);
+    let so_dir = std::path::Path::new(&so_abs)
+        .parent()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let so_name = std::path::Path::new(&so_abs)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    run(Command::new("docker").args([
+        "run",
+        "--rm",
+        "-v",
+        &format!("{so_dir}:/t"),
+        "alpine",
+        "sh",
+        "-c",
+        &format!(
+            "apk add --no-cache patchelf >/dev/null 2>&1 && \
+             patchelf --replace-needed libc.so {soname} /t/{so_name}"
+        ),
+    ]))
+}
+
+/// Build libcvisor.node and libcvisor.so for all four Node platform packages.
 fn cmd_node_artifacts(_args: &[String]) -> bool {
     NODE_TARGETS
         .iter()
-        .all(|(target, dir)| build_node_one(target, dir))
+        .all(|(target, dir)| build_node_one(target, dir) && build_ffi_one(target, dir))
 }
 
 /// Build the native-arch .node and run the bun test image against it.
@@ -148,13 +205,15 @@ fn cmd_run_node(args: &[String]) -> bool {
         eprintln!("run-node requires native arch");
         return false;
     }
-    // The bun image is Debian/glibc; build the matching gnu .node.
+    // The bun image is Debian/glibc; build the matching gnu artifacts. The
+    // .so is needed too: a bare "cvisor" import under Bun resolves the "bun"
+    // export condition to the FFI entry (test.ts pins the napi entry).
     let (target, dir) = if arch == "aarch64" {
         ("aarch64-unknown-linux-gnu.2.17", "linux-arm64-gnu")
     } else {
         ("x86_64-unknown-linux-gnu.2.17", "linux-x64-gnu")
     };
-    if !build_node_one(target, dir) {
+    if !build_node_one(target, dir) || !build_ffi_one(target, dir) {
         return false;
     }
     if !run(Command::new("docker").args(["build", "-t", "cvisor-node-test", "./sdks/node"])) {
@@ -206,33 +265,15 @@ fn cmd_ffi(args: &[String]) -> bool {
         eprintln!("expected {so} to exist");
         return false;
     }
-    // The dynamic musl cdylib NEEDs the bare `libc.so`, which only exists with
-    // musl-dev. Repoint it at the musl runtime soname present on every musl
-    // image so the .so loads on minimal runtimes (e.g. deno:alpine). Run
-    // patchelf inside an Alpine container so it isn't a host dependency.
-    let soname = format!("libc.musl-{arch}.so.1");
-    let so_dir = format!("{}/target/{target}/release", abs("."));
-    let patched = run(Command::new("docker").args([
-        "run",
-        "--rm",
-        "-v",
-        &format!("{so_dir}:/t"),
-        "alpine",
-        "sh",
-        "-c",
-        &format!(
-            "apk add --no-cache patchelf >/dev/null 2>&1 && \
-             patchelf --replace-needed libc.so {soname} /t/libcvisor.so"
-        ),
-    ]));
-    if !patched {
+    if !patch_musl_needed(&so, &target) {
         eprintln!("warning: patchelf step failed; .so may not load on minimal musl images");
     }
-    // Distribute the .so to each FFI SDK's native directory.
+    // Distribute the .so to each FFI SDK's native directory. The Bun/Deno
+    // entries live in the Node package and load from the platform packages.
+    let npm_arch = if arch == "aarch64" { "arm64" } else { "x64" };
     let dests = [
         format!("sdks/python/cvisor/_native/libcvisor-{arch}.so"),
-        format!("sdks/bun/native/libcvisor-{arch}.so"),
-        format!("sdks/deno/native/libcvisor-{arch}.so"),
+        format!("sdks/node/platforms/linux-{npm_arch}-musl/libcvisor.so"),
         format!("sdks/ruby/native/libcvisor-{arch}.so"),
         format!("sdks/erlang/priv/libcvisor-{arch}.so"),
     ];

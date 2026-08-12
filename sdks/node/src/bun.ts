@@ -1,18 +1,11 @@
-// cVisor Bun SDK — Bun FFI (bun:ffi) wrapper over the libcvisor C ABI.
-//
-//   import { Sandbox } from "./index";
-//   const out = new Sandbox().run("echo hello");
-//   console.log(out.stdout); // "hello\n"
+// Bun entry point (the "bun" export condition): a bun:ffi wrapper over the
+// libcvisor C ABI, exposing the same API as the napi entry (index.ts).
 
-import { dlopen, FFIType, ptr, CString, toArrayBuffer } from "bun:ffi";
-import { arch } from "os";
+import { dlopen, FFIType, ptr, toArrayBuffer, type Pointer } from "bun:ffi";
+import { libraryPath } from "./libpath";
+import { buildCommand, bytesToStream, createOutput, Output } from "./output";
 
-function libraryPath(): string {
-  const override = process.env.CVISOR_LIB;
-  if (override) return override;
-  const a = arch() === "arm64" ? "aarch64" : "x86_64";
-  return new URL(`./native/libcvisor-${a}.so`, import.meta.url).pathname;
-}
+export type { Output } from "./output";
 
 const { symbols } = dlopen(libraryPath(), {
   cvisor_sandbox_new: { args: [], returns: FFIType.ptr },
@@ -34,14 +27,10 @@ const { symbols } = dlopen(libraryPath(), {
   cvisor_bytes_free: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.void },
 });
 
-export interface Output {
-  stdout: string;
-  stderr: string;
-  stdoutBytes: Uint8Array;
-  stderrBytes: Uint8Array;
-}
-
-function readOutput(out: number, accessor: (o: number, lenPtr: number) => number): Uint8Array {
+function readOutput(
+  out: Pointer,
+  accessor: (o: Pointer, lenPtr: Pointer) => Pointer | null,
+): Uint8Array {
   const len = new BigUint64Array(1);
   const p = accessor(out, ptr(len));
   const n = Number(len[0]);
@@ -53,10 +42,10 @@ function readOutput(out: number, accessor: (o: number, lenPtr: number) => number
 }
 
 export class Sandbox {
-  private ptr: number;
+  private ptr: Pointer | null;
 
   constructor() {
-    this.ptr = symbols.cvisor_sandbox_new() as number;
+    this.ptr = symbols.cvisor_sandbox_new();
     if (!this.ptr) throw new Error("failed to create sandbox");
   }
 
@@ -64,20 +53,16 @@ export class Sandbox {
     symbols.cvisor_sandbox_set_log_level(this.ptr, level === "DEBUG" ? 1 : 0);
   }
 
-  run(command: string): Output {
+  /** Run a command to completion; the returned Output's streams replay the
+   * captured bytes so the shape matches the napi entry. */
+  runCmd(command: string): Output {
     const cmd = Buffer.from(command + "\0", "utf8");
-    const out = symbols.cvisor_run(this.ptr, ptr(cmd)) as number;
+    const out = symbols.cvisor_run(this.ptr, ptr(cmd));
     if (!out) throw new Error("sandbox run failed");
     try {
-      const stdoutBytes = readOutput(out, symbols.cvisor_output_stdout as any);
-      const stderrBytes = readOutput(out, symbols.cvisor_output_stderr as any);
-      const dec = new TextDecoder();
-      return {
-        stdoutBytes,
-        stderrBytes,
-        stdout: dec.decode(stdoutBytes),
-        stderr: dec.decode(stderrBytes),
-      };
+      const stdoutBytes = readOutput(out, symbols.cvisor_output_stdout);
+      const stderrBytes = readOutput(out, symbols.cvisor_output_stderr);
+      return createOutput(bytesToStream(stdoutBytes), bytesToStream(stderrBytes));
     } finally {
       symbols.cvisor_output_free(out);
     }
@@ -85,24 +70,15 @@ export class Sandbox {
 
   /** Tagged-template command runner: `sb.sh\`ls -l ${dir}\``. */
   sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
-    return this.run(buildCommand(strings, values));
+    return this.runCmd(buildCommand(strings, values));
   }
 
   close(): void {
     if (this.ptr) {
       symbols.cvisor_sandbox_free(this.ptr);
-      this.ptr = 0;
+      this.ptr = null;
     }
   }
-}
-
-/** Reconstruct the command string from a tagged template's parts and values. */
-function buildCommand(strings: TemplateStringsArray, values: unknown[]): string {
-  let command = strings[0];
-  for (let i = 0; i < values.length; i++) {
-    command += String(values[i]) + strings[i + 1];
-  }
-  return command;
 }
 
 let defaultSandbox: Sandbox | undefined;
@@ -110,8 +86,8 @@ let defaultSandbox: Sandbox | undefined;
 /**
  * Run a command in a shared, lazily-created sandbox via a tagged template:
  *
- *   import { sh } from "./index";
- *   console.log(sh`ls -l`.stdout);
+ *   import { sh } from "cvisor";
+ *   const files = await sh`ls -l`.stdout();
  */
 export function sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
   defaultSandbox ??= new Sandbox();

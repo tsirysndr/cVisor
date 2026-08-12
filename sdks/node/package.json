@@ -5,8 +5,24 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "bun": "./index.ts",
+      "bun": {
+        "types": "./dist/src/bun.d.ts",
+        "default": "./dist/src/bun.js"
+      },
+      "deno": {
+        "types": "./dist/src/deno.d.ts",
+        "default": "./dist/src/deno.js"
+      },
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./bun": {
+      "types": "./dist/src/bun.d.ts",
+      "default": "./dist/src/bun.js"
+    },
+    "./deno": {
+      "types": "./dist/src/deno.d.ts",
+      "default": "./dist/src/deno.js"
     }
   },
   "files": [

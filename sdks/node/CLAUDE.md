@@ -1,18 +1,29 @@
-# Node SDK
+# Node / Bun / Deno SDK
+
+One npm package (`cvisor`) serving three runtimes via conditional exports:
+Node gets the napi entry, Bun (`"bun"` condition) and Deno (`"deno"`
+condition) get FFI entries over the libcvisor C ABI. All three expose the
+same `Sandbox` / `sh` / `Output` surface — keep them in sync.
 
 ## Layout
 
 ```
 sdks/node/
-  index.ts              # Package entry point: re-exports Sandbox, sh, Output
+  index.ts              # napi entry point: re-exports Sandbox, sh, Output
   src/
-    native.ts           # FFI contract: NativeModule interface, platform check, require()
+    native.ts           # napi contract: NativeModule interface, platform check, require()
     napi.ts             # External<T> phantom type for opaque native handles
-    sandbox.ts          # Sandbox class + `sh` tagged-template runner (public API)
-  test.ts               # e2e smoke test (run via `cargo xtask run-node`)
+    sandbox.ts          # napi Sandbox + `sh` tagged-template runner
+    output.ts           # shared Output shape + createOutput/bytesToStream/buildCommand
+    libpath.ts          # locates libcvisor.so (CVISOR_LIB, else platform package)
+    bun.ts              # "bun" condition: bun:ffi over libcvisor.so
+    deno.ts             # "deno" condition: Deno.dlopen over libcvisor.so
+  test.ts               # napi e2e smoke test (run via `cargo xtask run-node`)
+  test-bun.ts           # Bun-entry e2e (CI: oven/bun:alpine + CVISOR_LIB)
+  test-deno.ts          # Deno-entry e2e (CI: denoland/deno:alpine + CVISOR_LIB)
   examples/             # runnable examples (cargo xtask run-node --script examples/…)
   platforms/
-    linux-{arm64,x64}-{gnu,musl}/   # per-platform npm packages holding libcvisor.node
+    linux-{arm64,x64}-{gnu,musl}/   # per-platform npm packages: libcvisor.node + libcvisor.so
 ```
 
 The native binding is implemented in **Rust** (crate `cvisor-node` at the repo
