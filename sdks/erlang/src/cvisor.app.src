@@ -1,0 +1,25 @@
+{application, cvisor,
+ [{description,
+   "In-process Linux sandbox for untrusted commands - Erlang SDK "
+   "(NIF over the libcvisor C ABI)"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env, []},
+  {modules, []},
+  {licenses, ["Apache-2.0"]},
+  {links, [{"GitHub", "https://github.com/tsirysndr/cVisor"}]},
+  %% Files shipped in the Hex tarball (rebar3_hex reads this from the app
+  %% details, not from rebar.config). The prebuilt libcvisor must go through
+  %% include_paths: rebar3_hex hard-excludes *.so from `files` (it assumes
+  %% they are build artifacts), and only include_paths overrides that filter.
+  {files, [
+    "src",
+    "c_src",
+    "Makefile",
+    "rebar.config",
+    "rebar.lock",
+    "README.md"
+  ]},
+  {include_paths, ["priv/libcvisor-*.so"]}
+ ]}.

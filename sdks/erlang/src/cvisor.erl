@@ -27,13 +27,29 @@ run_nif(_Command) ->
     erlang:nif_error(nif_not_loaded).
 
 init() ->
-    SoName =
+    PrivDir =
         case code:priv_dir(?APPNAME) of
             {error, bad_name} ->
                 %% Not running inside a release/app tree: look next to the beam.
                 EbinDir = filename:dirname(code:which(?MODULE)),
-                filename:join([filename:dirname(EbinDir), "priv", ?LIBNAME]);
+                filename:join(filename:dirname(EbinDir), "priv");
             Dir ->
-                filename:join(Dir, ?LIBNAME)
+                Dir
         end,
-    erlang:load_nif(SoName, 0).
+    ensure_lib_env(PrivDir),
+    erlang:load_nif(filename:join(PrivDir, ?LIBNAME), 0).
+
+%% Point the NIF at the bundled libcvisor-<arch>.so unless the caller already
+%% chose a library via CVISOR_LIB. The NIF reads the variable when it dlopens.
+ensure_lib_env(PrivDir) ->
+    case os:getenv("CVISOR_LIB") of
+        false ->
+            [Arch | _] = string:split(erlang:system_info(system_architecture), "-"),
+            Lib = filename:join(PrivDir, "libcvisor-" ++ Arch ++ ".so"),
+            case filelib:is_file(Lib) of
+                true -> os:putenv("CVISOR_LIB", Lib);
+                false -> ok
+            end;
+        _ ->
+            ok
+    end.
