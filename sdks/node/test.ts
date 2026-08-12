@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Sandbox } from "cvisor";
+import { Sandbox, sh } from "cvisor";
 
 const isInteractive = Bun.argv.includes("--interactive");
 const logLevelIndex = Bun.argv.indexOf("--log-level");
@@ -29,6 +29,21 @@ if (isInteractive) {
     process.stdout.write("cvisor> ");
   }
 } else {
+  // Assertions (fail the CI e2e on regression). Exercises the sh tagged
+  // template, redirects, pipes, and /proc + uname virtualization.
+  async function eq(out, expected: string, msg: string) {
+    const got = await out.stdout();
+    if (got !== expected) {
+      throw new Error(`${msg}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`);
+    }
+  }
+  await eq(sb.sh`echo hello from node`, "hello from node\n", "sh template");
+  await eq(sh`printf 'a\\nb\\nc\\n' | grep b`, "b\n", "pipeline");
+  await eq(sb.sh`echo x > /tmp/f && grep x /tmp/f`, "x\n", "tmp redirect");
+  await eq(sb.sh`uname -n`, "cvisor\n", "uname virtualized");
+  await eq(sb.sh`grep Name /proc/self/status`, "Name:\tcvisor-guest\n", "proc virtualized");
+  console.log("NODE_SDK_OK");
+
   const cmds = [
     "echo 'Hello, world!'",
     "sleep 1",

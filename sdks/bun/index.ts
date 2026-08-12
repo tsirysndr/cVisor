@@ -83,10 +83,37 @@ export class Sandbox {
     }
   }
 
+  /** Tagged-template command runner: `sb.sh\`ls -l ${dir}\``. */
+  sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
+    return this.run(buildCommand(strings, values));
+  }
+
   close(): void {
     if (this.ptr) {
       symbols.cvisor_sandbox_free(this.ptr);
       this.ptr = 0;
     }
   }
+}
+
+/** Reconstruct the command string from a tagged template's parts and values. */
+function buildCommand(strings: TemplateStringsArray, values: unknown[]): string {
+  let command = strings[0];
+  for (let i = 0; i < values.length; i++) {
+    command += String(values[i]) + strings[i + 1];
+  }
+  return command;
+}
+
+let defaultSandbox: Sandbox | undefined;
+
+/**
+ * Run a command in a shared, lazily-created sandbox via a tagged template:
+ *
+ *   import { sh } from "./index";
+ *   console.log(sh`ls -l`.stdout);
+ */
+export function sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
+  defaultSandbox ??= new Sandbox();
+  return defaultSandbox.sh(strings, ...values);
 }

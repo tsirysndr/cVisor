@@ -4,27 +4,40 @@
 
 ```
 sdks/node/
-  index.ts              # Package entry point, re-exports Sandbox
+  index.ts              # Package entry point: re-exports Sandbox, sh, Output
   src/
-    native.ts        # FFI contract: NativeModule interface, platform check, require()
+    native.ts           # FFI contract: NativeModule interface, platform check, require()
     napi.ts             # External<T> phantom type for opaque native handles
-    sandbox.ts          # Sandbox class, public API
-  test.ts               # Smoke test, run via `npm run dev`
+    sandbox.ts          # Sandbox class + `sh` tagged-template runner (public API)
+  test.ts               # e2e smoke test (run via `cargo xtask run-node`)
+  examples/             # runnable examples (cargo xtask run-node --script examples/…)
   platforms/
-    linux-arm64/        # @cvisor/linux-arm64 package
-    linux-x64/          # @cvisor/linux-x64 package
-  zig/                  # Zig source for native bindings
-    lib.zig             # Entry point, napi module registration
-    napi.zig            # N-API helpers, ZigExternal(T)
-    Sandbox.zig         # Sandbox implementation
+    linux-{arm64,x64}-{gnu,musl}/   # per-platform npm packages holding libcvisor.node
 ```
+
+The native binding is implemented in **Rust** (crate `cvisor-node` at the repo
+root, napi-rs), producing `libcvisor.node`. Build/run via
+`cargo xtask run-node` / `cargo xtask node-artifacts`.
 
 ## FFI boundary
 
-`src/native.ts` is the single source of truth for the Zig-TS contract. When adding a new native function: add it to the `NativeModule` interface in `native.ts`, implement in Zig.
+`src/native.ts` is the single source of truth for the native contract:
 
-Opaque handles use `External<T>` (defined in `napi.ts`) on the TS side. On the Zig side, `ZigExternal(T)` in `zig/napi.zig` handles wrapping/unwrapping — all JS-facing values are plain `c.napi_value`.
+```ts
+createSandbox(): External<"Sandbox">;
+sandboxSetLogLevel(sandbox, "OFF" | "DEBUG"): void;
+sandboxRunCmd(sandbox, command): { stdout: External<"Stream">, stderr: External<"Stream"> };
+streamNext(stream): Uint8Array | null;
+```
+
+When adding a native function: add it to the `NativeModule` interface in
+`native.ts`, then implement it in `crates/cvisor-node/src/lib.rs` with a
+matching `#[napi(js_name = "...")]`. Opaque handles use `External<T>`
+(`napi.ts`) on the TS side; the Rust side returns `napi::External<T>` and
+receives `ExternalRef<T>`.
 
 ## Platform packages
 
-The `platforms/` subdirectories are npm workspace packages. `npm install` on Linux resolves them locally via workspaces. On macOS, `npm install` will fail due to `os`/`cpu` filtering in the platform package.json files -- use `npm run dev` to build and test in Docker instead.
+The `platforms/` subdirectories are npm workspace packages. `npm install` on
+Linux resolves them locally via workspaces. On macOS `npm install` skips them
+(`os`/`cpu` filtering), so build and test in Docker via `cargo xtask run-node`.

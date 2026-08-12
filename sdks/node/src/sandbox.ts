@@ -35,13 +35,45 @@ export class Sandbox {
     native.sandboxSetLogLevel(this.ptr, level);
   }
 
-  runCmd(command: string) {
+  runCmd(command: string): Output {
     const result = native.sandboxRunCmd(this.ptr, command);
     return createOutput(
       new Stream(result.stdout).toReadableStream(),
       new Stream(result.stderr).toReadableStream(),
     );
   }
+
+  /**
+   * Tagged-template command runner: `sb.sh\`ls -l ${dir}\``.
+   * Equivalent to `sb.runCmd("ls -l <dir>")`.
+   */
+  sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
+    return this.runCmd(buildCommand(strings, values));
+  }
+}
+
+/** Reconstruct the command string from a tagged template's parts and values. */
+function buildCommand(strings: TemplateStringsArray, values: unknown[]): string {
+  let command = strings[0];
+  for (let i = 0; i < values.length; i++) {
+    command += String(values[i]) + strings[i + 1];
+  }
+  return command;
+}
+
+let defaultSandbox: Sandbox | undefined;
+
+/**
+ * Run a command in a shared, lazily-created sandbox via a tagged template:
+ *
+ *   import { sh } from "cvisor";
+ *   const files = await sh`ls -l`.stdout();
+ *
+ * For an isolated sandbox, construct your own and use `sb.sh` / `sb.runCmd`.
+ */
+export function sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
+  defaultSandbox ??= new Sandbox();
+  return defaultSandbox.sh(strings, ...values);
 }
 
 export interface Output {
