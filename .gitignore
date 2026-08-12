@@ -1,8 +1,25 @@
 .zig-cache/
 zig-out/
+target/
 *.o
+
+# Built FFI/native artifacts distributed into the SDK dirs by `cargo xtask ffi`.
+*.so
+src/sdks/*/native/
+src/sdks/python/bvisor/_native/
+src/sdks/erlang/priv/
+src/sdks/erlang/ebin/
+# uv / Python
+.venv/
+__pycache__/
+*.egg-info/
+# Ruby / Erlang
+src/sdks/ruby/vendor/
 *.node
 node_modules/
 dist/
 .env
 zig-pkg/
+# Erlang crash dumps
+erl_crash.dump
+*.dump

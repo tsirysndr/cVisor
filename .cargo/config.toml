@@ -1,0 +1,15 @@
+# Cross-compiled musl test binaries are static; run them inside an Alpine
+# container with seccomp disabled so the sandbox can install its own filter.
+# `cargo test --target <triple>` transparently runs each built binary through
+# these runner scripts (mirrors the old `zig build test` docker flow).
+
+[alias]
+xtask = "run --package xtask --"
+
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+runner = "scripts/docker-test-runner.sh"
+
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"
+runner = "scripts/docker-test-runner-amd64.sh"

@@ -146,21 +146,29 @@ Not yet handled but likely necessary for Bash compatibility. Currently return `E
 
 ## Development Guide
 
-#### Zig
-bVisor is written in Zig. Zig is pre-1.0, so compilation is only guaranteed with the exact zig build. We're using a tagged commit on 0.16 dev, which includes major breaking changes (Io) compared to previous versions, so please use the exact version specified in the `build.zig.zon` file. [anyzig](https://github.com/marler8997/anyzig) is the recommended tool for getting the correct version of Zig. It's also recommended to compile ZLS from source using a tagged commit compatible with Zig. You'll be flying blind otherwise.
+#### Rust
 
-#### Cross-compilation
-bVisor depends on Linux kernel features, although it's developed primarily on ARM Macs. Zig cross-compiles to Linux, and all tests run in Docker.
+bVisor is written in **Rust** (a Cargo workspace under `crates/`). It depends on
+Linux kernel features but is developed primarily on ARM Macs; cross-compilation
+uses [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild), and all
+kernel-facing tests run in Docker.
+
+**Requires**: a stable Rust toolchain with the four linux targets, `cargo-zigbuild`, and Docker.
 
 ```bash
-zig build           # Cross-compile for all targets (exe, tests, N-API .node binaries)
-zig build test      # Unit tests in Docker container
-zig build run       # E2E smoke test in Docker (scorecard of supported syscalls)
-zig build run-node  # Run E2E node SDK tests with current zig core build
+cargo test -p bvisor-core        # pure-logic unit tests on the host (macOS ok)
+cargo xtask test                 # full unit + e2e suite in Alpine (Docker, cross-compiled musl)
+cargo xtask run                  # E2E smoke scorecard in the sandbox in Docker
+cargo xtask ffi                  # build libbvisor.so and distribute it to the FFI SDKs
+cargo xtask run-node             # build libbvisor.node + run the Node SDK test.ts in bun
+cargo xtask node-artifacts       # build libbvisor.node for all 4 platform packages
 ```
 
-`run` and `run-node` support the `-Dfail-loudly` cli flag, to crash on unsupported syscall.
+Build with the `fail-loudly` feature to panic on an unhandled syscall instead of
+returning ENOSYS:
+
 ```bash
-zig build run -Dfail-loudly
-zig build run-node -Dfail-loudly
+cargo build -p bvisor-core --features fail-loudly
 ```
+
+See `src/sdks/README.md` for the language SDKs (Node, Bun, Deno, Python, Ruby, Erlang).

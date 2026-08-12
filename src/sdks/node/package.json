@@ -16,10 +16,10 @@
   ],
   "scripts": {
     "build": "tsc",
-    "build:zig": "cd ../../.. && zig build -Doptimize=ReleaseSafe",
+    "build:native": "cd ../../.. && cargo xtask node-artifacts",
     "prepublishOnly": "npm run build",
     "version:patch": "npm version patch --workspaces --no-git-tag-version --force && npm version patch --no-git-tag-version --force",
-    "publish:all": "npm run build:zig && bun scripts/publish.ts"
+    "publish:all": "npm run build:native && bun scripts/publish.ts"
   },
   "workspaces": [
     "platforms/*"
