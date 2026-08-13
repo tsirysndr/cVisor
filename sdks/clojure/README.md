@@ -1,4 +1,6 @@
 # cVisor — Clojure SDK
+[![Clojars Project](https://img.shields.io/clojars/v/io.github.tsirysndr/cvisor.svg)](https://clojars.org/io.github.tsirysndr/cvisor)
+
 
 Java FFM (`java.lang.foreign`) bindings over the `libcvisor` C ABI. Linux-only
 at runtime; requires **JDK 22+** (the FFM API is final as of JDK 22). The
