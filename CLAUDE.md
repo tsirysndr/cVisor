@@ -11,7 +11,7 @@ The goal of cVisor is to be a lightweight sandbox for untrusted user or LLM-gene
 **Status**: Rewritten from the original Zig prototype to **pure Rust**. The Rust
 implementation under `crates/` is the sole codebase; it runs the full SDK surface
 (45 syscall handlers, all filesystem backends, the process/namespace model,
-virtualized `/proc`, and six language SDKs). The Zig tree has been removed.
+virtualized `/proc`, and seven language SDKs). The Zig tree has been removed.
 
 **Greenfield project**: No users, no backward compatibility concerns. Delete dead code freely.
 
@@ -86,7 +86,8 @@ double-close from `FdTable.clone` sharing a raw fd (now dup-on-clone).
 ## SDKs
 
 See `sdks/README.md`. Node uses napi (`libcvisor.node`); Bun, Deno, Python
-(uv), Ruby (fiddle), and Erlang (NIF) all wrap the shared `libcvisor.so` C ABI.
+(uv), Ruby (fiddle), Erlang (NIF), and Clojure (Java FFM) all wrap the shared
+`libcvisor.so` C ABI.
 
 
 ## Key Linux APIs Used

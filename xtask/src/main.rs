@@ -276,6 +276,7 @@ fn cmd_ffi(args: &[String]) -> bool {
         format!("sdks/node/platforms/linux-{npm_arch}-musl/libcvisor.so"),
         format!("sdks/ruby/native/libcvisor-{arch}.so"),
         format!("sdks/erlang/priv/libcvisor-{arch}.so"),
+        format!("sdks/clojure/resources/cvisor/native/libcvisor-{arch}.so"),
     ];
     for dest in dests {
         let p = std::path::Path::new(&dest);

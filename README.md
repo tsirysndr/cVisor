@@ -65,7 +65,7 @@ Unsafe commands are blocked:
 sb.runCmd("chroot /tmp"); // error
 ```
 
-Python, Ruby, Erlang, Bun, and Deno SDKs are also published — see
+Python, Ruby, Erlang, Clojure, Bun, and Deno SDKs are also published — see
 [sdks/README.md](sdks/README.md).
 
 ## Examples
@@ -197,4 +197,4 @@ returning ENOSYS:
 cargo build -p cvisor-core --features fail-loudly
 ```
 
-See `sdks/README.md` for the language SDKs (Node, Bun, Deno, Python, Ruby, Erlang).
+See `sdks/README.md` for the language SDKs (Node, Bun, Deno, Python, Ruby, Erlang, Clojure).

@@ -2,14 +2,15 @@
 
 cVisor ships one **native runtime** and several thin language SDKs that wrap it.
 
-| SDK    | Mechanism                                     | Entry point          |
-| ------ | --------------------------------------------- | -------------------- |
-| Node   | N-API native module (`libcvisor.node`)        | `node/`              |
-| Bun    | Bun FFI (`bun:ffi`) over `libcvisor.so`       | `node/src/bun.ts`    |
-| Deno   | Deno FFI (`Deno.dlopen`) over `libcvisor.so`  | `node/src/deno.ts`   |
-| Python | `ctypes` FFI over `libcvisor.so` (uv project) | `python/`            |
-| Ruby   | `fiddle` FFI over `libcvisor.so`              | `ruby/lib/cvisor.rb` |
-| Erlang | NIF bridging to `libcvisor.so`                | `erlang/`            |
+| SDK     | Mechanism                                          | Entry point          |
+| ------- | -------------------------------------------------- | -------------------- |
+| Node    | N-API native module (`libcvisor.node`)             | `node/`              |
+| Bun     | Bun FFI (`bun:ffi`) over `libcvisor.so`            | `node/src/bun.ts`    |
+| Deno    | Deno FFI (`Deno.dlopen`) over `libcvisor.so`       | `node/src/deno.ts`   |
+| Python  | `ctypes` FFI over `libcvisor.so` (uv project)      | `python/`            |
+| Ruby    | `fiddle` FFI over `libcvisor.so`                   | `ruby/lib/cvisor.rb` |
+| Erlang  | NIF bridging to `libcvisor.so`                     | `erlang/`            |
+| Clojure | Java FFM (`java.lang.foreign`) over `libcvisor.so` | `clojure/`           |
 
 Node, Bun, and Deno all install the same `cvisor` npm package: its `exports`
 map picks the napi entry under Node and the FFI entries under Bun (`"bun"`
@@ -67,13 +68,20 @@ puts Cvisor::Sandbox.new.run("echo hi").stdout
 %% Erlang
 {ok, Out, _Err} = cvisor:run(<<"echo hi">>).
 ```
+```clojure
+;; Clojure (io.github.tsirysndr/cvisor on Clojars, JDK 22+)
+(require '[cvisor.core :as cvisor])
+(with-open [sb (cvisor/sandbox)]
+  (print (:stdout (cvisor/run sb "echo hi"))))    ; "hi\n"
+```
 
 ## Interactive consoles
 
-The Python and Ruby SDKs ship a REPL with a live sandbox (`sb`) and an
-`sh("cmd")` helper preloaded:
+The Python, Ruby, and Clojure SDKs ship a REPL with a live sandbox (`sb`) and
+an `sh("cmd")` helper preloaded:
 
 ```bash
 uv run --extra console cvisor    # Python  -> IPython
-bin/console                       # Ruby    -> IRB (from sdks/ruby)
+bin/console                      # Ruby    -> IRB (from sdks/ruby)
+clojure -M:console               # Clojure -> rebel-readline (from sdks/clojure)
 ```

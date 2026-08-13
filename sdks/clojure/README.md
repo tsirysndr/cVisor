@@ -1,0 +1,83 @@
+# cVisor — Clojure SDK
+
+Java FFM (`java.lang.foreign`) bindings over the `libcvisor` C ABI. Linux-only
+at runtime; requires **JDK 22+** (the FFM API is final as of JDK 22). The
+pinned toolchain is in `mise.toml` — run `mise install` to get it.
+
+Published on Clojars as `io.github.tsirysndr/cvisor`.
+
+## Usage
+
+```clojure
+(require '[cvisor.core :as cvisor])
+
+(with-open [sb (cvisor/sandbox)]
+  (let [out (cvisor/run sb "echo hello")]
+    (print (:stdout out))     ; "hello\n"
+    (print (:stderr out))))   ; ""
+```
+
+`run` blocks until the sandboxed command exits and returns a map with
+`:stdout` / `:stderr` (String) and `:stdout-bytes` / `:stderr-bytes`.
+`sandbox` returns a `Closeable`, so `with-open` frees it; `close` is also
+exposed directly and is idempotent.
+
+Add `--enable-native-access=ALL-UNNAMED` to your JVM options to silence the
+FFM restricted-method warning (the `:test` and `:console` aliases already do).
+
+## Interactive console
+
+Launch a rebel-readline REPL with a live sandbox preloaded:
+
+```bash
+clojure -M:console
+```
+
+```
+cVisor interactive console
+  sb                    -> a live Sandbox
+  (sh "cmd")            -> run a shell command in the sandbox, printing stdout/stderr
+  (cvisor.core/sandbox) -> create your own
+
+user=> (sh "echo hello; uname -n")
+hello
+cvisor
+```
+
+### Quick try under Docker
+
+The sandbox only runs on Linux; from any host, build the native library once
+(`cargo xtask ffi` from the repo root) and drop into the console in a musl
+JDK 22 container (multi-arch; installs the Clojure CLI on first run):
+
+```bash
+docker run -it --rm --security-opt seccomp=unconfined \
+  -v "$PWD":/sdk -w /sdk bellsoft/liberica-openjdk-alpine-musl:22 \
+  sh -c 'apk add --no-cache bash curl >/dev/null &&
+         curl -sLO https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh &&
+         bash linux-install.sh >/dev/null && clojure -M:console'
+```
+
+## Development
+
+The SDK loads `libcvisor.so`. Build it from the repo root (`cargo xtask ffi`),
+which drops a copy into `resources/cvisor/native/`, or point the SDK at one
+via the `CVISOR_LIB` environment variable.
+
+Run the e2e test in a musl JDK container (Linux syscalls + seccomp required):
+
+```bash
+docker run --rm --security-opt seccomp=unconfined \
+  -v "$PWD":/sdk -w /sdk bellsoft/liberica-openjdk-alpine-musl:22 \
+  sh -c 'apk add --no-cache bash curl >/dev/null &&
+         curl -sLO https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh &&
+         bash linux-install.sh >/dev/null && clojure -M:test'
+```
+
+## Publishing
+
+```bash
+cargo xtask ffi && cargo xtask ffi --arch x86_64   # from the repo root: both arches
+clojure -T:build jar                               # bundles both .so files
+CLOJARS_USERNAME=... CLOJARS_PASSWORD=... clojure -T:build deploy
+```

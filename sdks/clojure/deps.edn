@@ -1,0 +1,13 @@
+{:paths ["src" "resources"]
+ :deps  {org.clojure/clojure {:mvn/version "1.12.1"}}
+ :aliases
+ {:test    {:extra-paths ["test"]
+            :jvm-opts    ["--enable-native-access=ALL-UNNAMED"]
+            :main-opts   ["-m" "cvisor.sandbox-test"]}
+  :console {:extra-paths ["dev"]
+            :extra-deps  {com.bhauman/rebel-readline {:mvn/version "0.1.5"}}
+            :jvm-opts    ["--enable-native-access=ALL-UNNAMED"]
+            :main-opts   ["-m" "cvisor.console"]}
+  :build   {:deps       {io.github.clojure/tools.build {:mvn/version "0.10.9"}
+                         slipset/deps-deploy            {:mvn/version "0.2.2"}}
+            :ns-default build}}}
