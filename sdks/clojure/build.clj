@@ -32,7 +32,7 @@
                 :src-dirs  ["src"]
                 :scm       {:url        "https://github.com/tsirysndr/cVisor"
                             :connection "scm:git:https://github.com/tsirysndr/cVisor.git"
-                            :tag        (str "v" version)}
+                            :tag        (str "clojure-sdk-v" version)}
                 :pom-data  [[:description
                              "In-process Linux sandbox — Clojure SDK (Java FFM over the libcvisor C ABI)"]
                             [:url "https://github.com/tsirysndr/cVisor"]
