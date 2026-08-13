@@ -1,3 +1,6 @@
 .cpcache/
 target/
 resources/cvisor/native/
+.rebel_readline_history
+linux-install.sh
+

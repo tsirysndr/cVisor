@@ -1,7 +1,8 @@
 (ns cvisor.console
   "Interactive console: a rebel-readline REPL with a live sandbox (`sb`) and an
   `sh` helper preloaded. Launch with `clojure -M:console`."
-  (:require [cvisor.core :as cvisor]
+  (:require [clojure.main]
+            [cvisor.core :as cvisor]
             [rebel-readline.clojure.main :as rebel]))
 
 (defn -main [& _]
@@ -18,4 +19,11 @@
     (println "  sb                    -> a live Sandbox")
     (println "  (sh \"cmd\")            -> run a shell command in the sandbox, printing stdout/stderr")
     (println "  (cvisor.core/sandbox) -> create your own")
-    (rebel/-main)))
+    (try
+      (rebel/-main)
+      (catch clojure.lang.ExceptionInfo e
+        (if (= :rebel-readline.jline-api/bad-terminal (:type (ex-data e)))
+          (do (println (.getMessage e))
+              (println "Falling back to the plain Clojure REPL.")
+              (clojure.main/main))
+          (throw e))))))
