@@ -10,6 +10,7 @@
 //!   void           cvisor_sandbox_set_log_level(CvisorSandbox*, int level);      // 0=off 1=debug
 //!   void           cvisor_sandbox_set_allow_network(CvisorSandbox*, int allow);  // 0=deny else allow
 //!   void           cvisor_sandbox_set_allow_listen(CvisorSandbox*, int allow);   // 0=deny else allow inbound TCP servers
+//!   void           cvisor_sandbox_set_env(CvisorSandbox*, const char* key, const char* value); // guest env var
 //!   int            cvisor_sandbox_write_file(CvisorSandbox*, const char* path, const uint8_t*, size_t); // 0 ok, -errno
 //!   uint8_t*       cvisor_sandbox_read_file(CvisorSandbox*, const char* path, size_t* out_len);         // NULL on error
 //!   int            cvisor_sandbox_copy_into(CvisorSandbox*, const char* host, const char* guest);       // file/dir, 0 ok, -errno
@@ -64,6 +65,7 @@ mod imp {
         log_level: LogLevel,
         allow_network: bool,
         allow_listen: bool,
+        env: Vec<(String, String)>,
     }
 
     /// Opaque result handle holding the fully-captured output of one run.
@@ -80,7 +82,32 @@ mod imp {
             log_level: LogLevel::Off,
             allow_network: true,
             allow_listen: false,
+            env: Vec::new(),
         }))
+    }
+
+    /// Set an environment variable for the guest (layered over PATH/HOME;
+    /// overrides an existing key). Applies to subsequent runs/sessions.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_sandbox_set_env(
+        sb: *mut Sandbox,
+        key: *const c_char,
+        value: *const c_char,
+    ) {
+        let Some(sb) = sb.as_mut() else { return };
+        if key.is_null() || value.is_null() {
+            return;
+        }
+        // SAFETY: caller guarantees NUL-terminated C strings.
+        let (Ok(key), Ok(value)) = (CStr::from_ptr(key).to_str(), CStr::from_ptr(value).to_str())
+        else {
+            return;
+        };
+        if let Some(e) = sb.env.iter_mut().find(|(k, _)| k == key) {
+            e.1 = value.to_string();
+        } else {
+            sb.env.push((key.to_string(), value.to_string()));
+        }
     }
 
     #[no_mangle]
@@ -137,6 +164,7 @@ mod imp {
         let opts = ExecOpts {
             allow_network: sb.allow_network,
             allow_listen: sb.allow_listen,
+            env: sb.env.clone(),
             timeout: (timeout_ms > 0).then(|| Duration::from_millis(timeout_ms)),
             ..ExecOpts::default()
         };
@@ -437,6 +465,7 @@ mod imp {
         let opts = ExecOpts {
             allow_network: sb.allow_network,
             allow_listen: sb.allow_listen,
+            env: sb.env.clone(),
             ..ExecOpts::default()
         };
         let (argv, mode) = if pty != 0 {

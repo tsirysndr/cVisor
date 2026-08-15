@@ -25,6 +25,7 @@ typedef int (*fn_out_exit_code)(void *);
 typedef void (*fn_bytes_free)(uint8_t *, size_t);
 typedef void (*fn_set_allow_network)(void *, int);
 typedef void (*fn_set_allow_listen)(void *, int);
+typedef void (*fn_set_env)(void *, const char *, const char *);
 typedef int (*fn_write_file)(void *, const char *, const uint8_t *, size_t);
 typedef uint8_t *(*fn_read_file)(void *, const char *, size_t *);
 typedef int (*fn_copy_into)(void *, const char *, const char *);
@@ -52,6 +53,7 @@ static fn_out_exit_code p_exit_code;
 static fn_bytes_free p_bytes_free;
 static fn_set_allow_network p_set_allow_network;
 static fn_set_allow_listen p_set_allow_listen;
+static fn_set_env p_set_env;
 static fn_write_file p_write_file;
 static fn_read_file p_read_file;
 static fn_copy_into p_copy_into;
@@ -83,6 +85,22 @@ static int g_allow_network = 1;
 /* Applied to each sandbox before running; default deny (matches libcvisor). */
 static int g_allow_listen = 0;
 
+/* Process-global guest env vars, layered over each sandbox before running.
+ * Fixed capacity; keys are unique (set_env_nif replaces an existing key). If
+ * full, further distinct keys are ignored. Entries are strdup'd and persist
+ * for the VM lifetime. */
+#define G_ENV_CAP 64
+static char *g_env_keys[G_ENV_CAP];
+static char *g_env_vals[G_ENV_CAP];
+static int g_env_count = 0;
+
+/* Set p_set_env for every var in the store, right after p_new(). */
+static void apply_env(void *sb) {
+    for (int i = 0; i < g_env_count; i++) {
+        p_set_env(sb, g_env_keys[i], g_env_vals[i]);
+    }
+}
+
 static int load_lib(void) {
     const char *path = getenv("CVISOR_LIB");
     if (!path || !path[0]) {
@@ -103,6 +121,7 @@ static int load_lib(void) {
         (fn_set_allow_network)dlsym(g_lib, "cvisor_sandbox_set_allow_network");
     p_set_allow_listen =
         (fn_set_allow_listen)dlsym(g_lib, "cvisor_sandbox_set_allow_listen");
+    p_set_env = (fn_set_env)dlsym(g_lib, "cvisor_sandbox_set_env");
     p_write_file = (fn_write_file)dlsym(g_lib, "cvisor_sandbox_write_file");
     p_read_file = (fn_read_file)dlsym(g_lib, "cvisor_sandbox_read_file");
     p_copy_into = (fn_copy_into)dlsym(g_lib, "cvisor_sandbox_copy_into");
@@ -126,7 +145,7 @@ static int load_lib(void) {
 
     return p_new && p_free && p_run_timeout && p_out_free && p_stdout &&
            p_stderr && p_exit_code && p_bytes_free && p_set_allow_network &&
-           p_set_allow_listen && p_write_file && p_read_file &&
+           p_set_allow_listen && p_set_env && p_write_file && p_read_file &&
            p_copy_into && p_copy_out && p_cache_save && p_cache_restore &&
            p_session_start && p_session_read_stdout && p_session_read_stderr &&
            p_session_write_stdin && p_session_resize && p_session_try_wait &&
@@ -172,6 +191,7 @@ static ERL_NIF_TERM run_nif(ErlNifEnv *env, int argc,
     }
     p_set_allow_network(sb, g_allow_network);
     p_set_allow_listen(sb, g_allow_listen);
+    apply_env(sb);
 
     void *out = p_run_timeout(sb, cmd, (uint64_t)timeout_ms);
     enif_free(cmd);
@@ -267,6 +287,7 @@ static ERL_NIF_TERM session_start_nif(ErlNifEnv *env, int argc,
     }
     p_set_allow_network(sb, g_allow_network);
     p_set_allow_listen(sb, g_allow_listen);
+    apply_env(sb);
 
     void *sess = p_session_start(sb, cmd, pty);
     if (cmd) {
@@ -507,6 +528,56 @@ static char *bin_to_cstr(ErlNifBinary *bin) {
     return s;
 }
 
+/* Set (or replace) a process-global guest env var, layered over every sandbox
+ * created by subsequent runs/sessions. If Key already exists its value is
+ * replaced; otherwise it is appended. When the store is full, a new distinct
+ * key is ignored. Stored strings are strdup'd and live for the VM lifetime. */
+static ERL_NIF_TERM set_env_nif(ErlNifEnv *env, int argc,
+                                const ERL_NIF_TERM argv[]) {
+    ErlNifBinary key_bin, val_bin;
+    if (argc != 2 || !enif_inspect_binary(env, argv[0], &key_bin) ||
+        !enif_inspect_binary(env, argv[1], &val_bin)) {
+        return enif_make_badarg(env);
+    }
+
+    char *key = bin_to_cstr(&key_bin);
+    char *val = bin_to_cstr(&val_bin);
+    if (!key || !val) {
+        enif_free(key);
+        enif_free(val);
+        return enif_raise_exception(env, enif_make_atom(env, "enomem"));
+    }
+
+    for (int i = 0; i < g_env_count; i++) {
+        if (strcmp(g_env_keys[i], key) == 0) {
+            char *dup = strdup(val);
+            if (dup) {
+                free(g_env_vals[i]);
+                g_env_vals[i] = dup;
+            }
+            enif_free(key);
+            enif_free(val);
+            return enif_make_atom(env, "ok");
+        }
+    }
+
+    if (g_env_count < G_ENV_CAP) {
+        char *kdup = strdup(key);
+        char *vdup = strdup(val);
+        if (kdup && vdup) {
+            g_env_keys[g_env_count] = kdup;
+            g_env_vals[g_env_count] = vdup;
+            g_env_count++;
+        } else {
+            free(kdup);
+            free(vdup);
+        }
+    }
+    enif_free(key);
+    enif_free(val);
+    return enif_make_atom(env, "ok");
+}
+
 /* Map a 0 (ok) / nonzero (-errno) C return into ok | {error, Atom}. */
 static ERL_NIF_TERM rc_result(ErlNifEnv *env, int rc) {
     if (rc == 0) {
@@ -660,6 +731,7 @@ static ErlNifFunc nif_funcs[] = {
     {"run_nif", 2, run_nif, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"set_allow_network_nif", 1, set_allow_network_nif, 0},
     {"set_allow_listen_nif", 1, set_allow_listen_nif, 0},
+    {"set_env_nif", 2, set_env_nif, 0},
     {"session_start_nif", 2, session_start_nif, 0},
     {"session_read_stdout_nif", 1, session_read_stdout_nif, 0},
     {"session_read_stderr_nif", 1, session_read_stderr_nif, 0},

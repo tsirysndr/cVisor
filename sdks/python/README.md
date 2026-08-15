@@ -71,6 +71,7 @@ sb.set_allow_network(False)  # deny outbound networking
 
 ```python
 sb.set_allow_listen(True)  # allow the guest to run TCP servers
+sb.set_env("TOKEN", "xyz")   # environment variable for the guest
 ```
 
 ### Files

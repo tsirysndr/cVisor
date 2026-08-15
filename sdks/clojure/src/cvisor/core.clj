@@ -55,6 +55,7 @@
        :set-log-level       (bind "cvisor_sandbox_set_log_level" (fd nil ptr int32))
        :set-allow-network   (bind "cvisor_sandbox_set_allow_network" (fd nil ptr int32))
        :set-allow-listen    (bind "cvisor_sandbox_set_allow_listen" (fd nil ptr int32))
+       :set-env             (bind "cvisor_sandbox_set_env" (fd nil ptr ptr ptr))
        :write-file          (bind "cvisor_sandbox_write_file" (fd int32 ptr ptr ptr size-t))
        :read-file           (bind "cvisor_sandbox_read_file" (fd ptr ptr ptr ptr))
        :copy-into           (bind "cvisor_sandbox_copy_into" (fd int32 ptr ptr ptr))
@@ -129,6 +130,13 @@
   Off by default (outbound-only)."
   [^Sandbox sb allow?]
   (call :set-allow-listen (live-ptr sb) (if allow? (int 1) (int 0))))
+
+(defn set-env!
+  "Set an environment variable for the guest (layered over PATH/HOME; overrides
+  an existing key). Applies to subsequent runs of the sandbox."
+  [^Sandbox sb ^String key ^String value]
+  (with-open [arena (Arena/ofConfined)]
+    (call :set-env (live-ptr sb) (.allocateFrom arena key) (.allocateFrom arena value))))
 
 (defn write-file
   "Write bytes (or a String) to `path` inside the sandbox overlay. The file is

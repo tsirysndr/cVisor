@@ -65,6 +65,9 @@ def load_library(path: str | None = None) -> ctypes.CDLL:
     lib.cvisor_sandbox_set_allow_listen.restype = None
     lib.cvisor_sandbox_set_allow_listen.argtypes = [c_void_p, c_int]
 
+    lib.cvisor_sandbox_set_env.restype = None
+    lib.cvisor_sandbox_set_env.argtypes = [c_void_p, c_char_p, c_char_p]
+
     lib.cvisor_sandbox_write_file.restype = c_int
     lib.cvisor_sandbox_write_file.argtypes = [c_void_p, c_char_p, POINTER(c_uint8), c_size_t]
 
@@ -240,6 +243,12 @@ class Sandbox:
     def set_allow_listen(self, allow: bool) -> None:
         """Allow or deny (default) inbound TCP servers (listen/accept)."""
         self._lib.cvisor_sandbox_set_allow_listen(self._ptr, 1 if allow else 0)
+
+    def set_env(self, key: str, value: str) -> None:
+        """Set an environment variable for the guest (applies to later runs)."""
+        self._lib.cvisor_sandbox_set_env(
+            self._ptr, key.encode("utf-8"), value.encode("utf-8")
+        )
 
     def write_file(self, path: str, data: bytes | str) -> None:
         """Write ``data`` to ``path`` in the sandbox's persistent overlay.

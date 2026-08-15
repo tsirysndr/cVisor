@@ -147,3 +147,12 @@ def test_shell_pty():
         assert "SHELL_OK" in text
         assert "IS_TTY" in text
         sh.close()
+
+
+def test_set_env():
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        sb.set_env("FOO", "bar")
+        sb.set_env("GREETING", "hi there")
+        assert sb.run("echo $FOO-$GREETING").stdout == "bar-hi there\n"

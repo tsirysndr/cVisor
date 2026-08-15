@@ -35,6 +35,10 @@ const lib = Deno.dlopen(libraryPath(), {
     parameters: ["pointer", "i32"],
     result: "void",
   },
+  cvisor_sandbox_set_env: {
+    parameters: ["pointer", "buffer", "buffer"],
+    result: "void",
+  },
   cvisor_sandbox_write_file: {
     parameters: ["pointer", "buffer", "buffer", "usize"],
     result: "i32",
@@ -158,6 +162,11 @@ export class Sandbox {
   /** Enable or disable inbound TCP servers — bind fixed port, listen (default off). */
   setAllowListen(allow: boolean): void {
     lib.symbols.cvisor_sandbox_set_allow_listen(this.#ptr, allow ? 1 : 0);
+  }
+
+  /** Set an environment variable for the guest (applies to subsequent runs). */
+  setEnv(key: string, value: string): void {
+    lib.symbols.cvisor_sandbox_set_env(this.#ptr, cstr(key), cstr(value));
   }
 
   /** Write a file into the sandbox overlay (visible to later runs of this sandbox). */

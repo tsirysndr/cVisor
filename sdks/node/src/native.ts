@@ -21,6 +21,11 @@ export interface NativeModule {
     sandbox: External<"Sandbox">,
     allow: boolean,
   ): void;
+  sandboxSetEnv(
+    sandbox: External<"Sandbox">,
+    key: string,
+    value: string,
+  ): void;
   sandboxWriteFile(
     sandbox: External<"Sandbox">,
     path: string,

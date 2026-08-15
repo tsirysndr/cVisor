@@ -274,6 +274,7 @@ fn timeout_kills_runaway_command() {
         allow_listen: false,
         timeout: Some(std::time::Duration::from_millis(300)),
         capture_stdio: true,
+        env: Vec::new(),
     };
     let (_o, _e, code) = run_opts("sleep 30", opts);
     // SIGKILL from the watchdog -> 128 + 9.
@@ -287,6 +288,7 @@ fn command_under_timeout_completes_normally() {
         allow_listen: false,
         timeout: Some(std::time::Duration::from_millis(5000)),
         capture_stdio: true,
+        env: Vec::new(),
     };
     let (out, _e, code) = run_opts("echo quick", opts);
     assert_eq!(out, "quick\n");
@@ -300,6 +302,7 @@ fn network_disabled_blocks_inet_socket() {
         allow_listen: false,
         timeout: None,
         capture_stdio: true,
+        env: Vec::new(),
     };
     // Busybox nc opening an INET socket must fail with the egress kill switch on.
     let (_out, err, code) = run_opts("nc -w1 127.0.0.1 9 </dev/null 2>&1; echo done", opts);
@@ -312,6 +315,7 @@ fn network_disabled_blocks_inet_socket() {
             allow_listen: false,
             timeout: None,
             capture_stdio: true,
+            env: Vec::new(),
         },
     );
     assert_eq!(out, "still-alive\n");
@@ -365,6 +369,7 @@ fn passthrough_stdio_and_argv_exec() {
     let err = Arc::new(LogBuffer::new());
     let opts = ExecOpts {
         capture_stdio: false,
+        env: Vec::new(),
         ..ExecOpts::default()
     };
     let code = run_argv(
@@ -373,7 +378,7 @@ fn passthrough_stdio_and_argv_exec() {
         &exec_argv(&["true".to_string()]),
         Arc::clone(&out),
         Arc::clone(&err),
-        opts,
+        opts.clone(),
     )
     .expect("run_argv failed");
     assert_eq!(code, 0);
@@ -436,6 +441,7 @@ fn allow_listen_gates_fixed_port_bind() {
         allow_network: true,
         allow_listen: false,
         capture_stdio: true,
+        env: Vec::new(),
         timeout: None,
     };
     let (_o, err, _c) = run_opts("timeout 1 nc -l -p 7799", denied);
@@ -448,6 +454,7 @@ fn allow_listen_gates_fixed_port_bind() {
         allow_network: true,
         allow_listen: true,
         capture_stdio: true,
+        env: Vec::new(),
         timeout: None,
     };
     let (_o, err, _c) = run_opts("timeout 1 nc -l -p 7799", allowed);
@@ -546,4 +553,22 @@ fn cache_save_restore_across_sandboxes() {
             std::fs::remove_dir_all(format!("/tmp/.cvisor/sb/{}", String::from_utf8_lossy(&uid)));
     }
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn env_vars_are_passed_and_override_defaults() {
+    // Extra env is visible; a key already in the defaults (HOME) is overridden.
+    let opts = ExecOpts {
+        env: vec![
+            ("FOO".to_string(), "bar".to_string()),
+            ("HOME".to_string(), "/custom".to_string()),
+        ],
+        ..ExecOpts::default()
+    };
+    let (out, _e, code) = run_opts("echo $FOO; echo $HOME; echo $PATH | grep -c bin", opts);
+    assert_eq!(code, 0);
+    let mut lines = out.lines();
+    assert_eq!(lines.next(), Some("bar")); // extra var
+    assert_eq!(lines.next(), Some("/custom")); // overrode the default HOME=/
+    assert_eq!(lines.next(), Some("1")); // default PATH still present
 }

@@ -81,4 +81,12 @@ await eq(
   sb4.setAllowListen(true); // smoke: does not throw
 }
 
+// Environment variables.
+{
+  const sbe = new Sandbox();
+  sbe.setEnv("FOO", "bar");
+  sbe.setEnv("GREETING", "hi there");
+  await eq(sbe.runCmd("echo $FOO-$GREETING"), "bar-hi there\n", "setEnv");
+}
+
 console.log("BUN_SDK_OK");

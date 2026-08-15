@@ -29,6 +29,7 @@ module Cvisor
     extern "void cvisor_sandbox_set_log_level(void*, int)"
     extern "void cvisor_sandbox_set_allow_network(void*, int)"
     extern "void cvisor_sandbox_set_allow_listen(void*, int)"
+    extern "void cvisor_sandbox_set_env(void*, const char*, const char*)"
     extern "int cvisor_sandbox_write_file(void*, const char*, const char*, size_t)"
     extern "void* cvisor_sandbox_read_file(void*, const char*, void*)"
     extern "void* cvisor_run(void*, const char*)"
@@ -102,6 +103,11 @@ module Cvisor
     # Allow (or deny) inbound TCP servers inside the sandbox (denied by default).
     def set_allow_listen(allow)
       Native.cvisor_sandbox_set_allow_listen(@ptr, allow ? 1 : 0)
+    end
+
+    # Set an environment variable for the guest (applies to subsequent runs).
+    def set_env(key, value)
+      Native.cvisor_sandbox_set_env(@ptr, key.to_s, value.to_s)
     end
 
     # Seed a file into the sandbox's persistent overlay at an absolute `path`;

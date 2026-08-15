@@ -54,4 +54,10 @@ raise "shell missing SHELL_OK: #{merged.inspect}" unless merged.include?("SHELL_
 raise "shell missing IS_TTY: #{merged.inspect}" unless merged.include?("IS_TTY")
 sh.close
 
+
+sbe = Cvisor::Sandbox.new
+sbe.set_env("FOO", "bar")
+sbe.set_env("GREETING", "hi there")
+assert_eq(sbe.run("echo $FOO-$GREETING").stdout, "bar-hi there\n", "set_env")
+
 puts "RUBY_SDK_OK"

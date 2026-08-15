@@ -75,6 +75,12 @@
       (is (= "alpha\nbeta\n"
              (:stdout (cvisor/run b "grep alpha /tmp/proj/a.txt && grep beta /tmp/proj/sub/b.txt")))))))
 
+(deftest env-vars
+  (with-open [sb (cvisor/sandbox)]
+    (cvisor/set-env! sb "FOO" "bar")
+    (cvisor/set-env! sb "GREETING" "hi there")
+    (is (= "bar-hi there\n" (:stdout (cvisor/run sb "echo $FOO-$GREETING"))))))
+
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'cvisor.sandbox-test)]
     (if (zero? (+ fail error))

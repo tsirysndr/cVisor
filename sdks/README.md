@@ -41,7 +41,9 @@ void           cvisor_bytes_free(uint8_t* ptr, size_t len);
 (0 = no limit); a timed-out run reports exit code 137 (128 + SIGKILL). With
 networking disabled the guest cannot open INET/INET6 sockets;
 `cvisor_sandbox_set_allow_listen` opts into inbound TCP servers (bind a fixed
-port, `listen`, `accept`).
+port, `listen`, `accept`). `cvisor_sandbox_set_env(sb, key, value)` sets a guest
+environment variable (layered over the default PATH/HOME) — each SDK wraps it as
+`set_env`.
 
 Files can be transferred in and out of a sandbox's persistent overlay without a
 running guest — `cvisor_sandbox_write_file` / `cvisor_sandbox_read_file` (single

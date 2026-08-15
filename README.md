@@ -75,7 +75,8 @@ sandboxed shell, or copies files in and out:
 
 ```bash
 cvisor -- uname -a                                # run a command, streaming its output
-cvisor                                            # interactive /bin/sh on a PTY
+cvisor                                            # interactive shell (bash if present) on a PTY
+cvisor -e FOO=bar -e TOKEN=xyz -- printenv FOO    # pass environment variables
 cvisor --no-network -- ...                        # deny outbound networking
 cvisor --allow-listen -- ...                      # permit inbound TCP servers
 cvisor --timeout 5000 -- ...                      # SIGKILL the guest after 5s

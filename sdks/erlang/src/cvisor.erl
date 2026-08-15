@@ -7,7 +7,7 @@
 %% path, otherwise it is loaded from the application's priv directory.
 -module(cvisor).
 
--export([run/1, run/2, set_allow_network/1, set_allow_listen/1]).
+-export([run/1, run/2, set_allow_network/1, set_allow_listen/1, set_env/2]).
 -export([run_streaming/1, run_streaming/2, shell/0, shell/1]).
 -export([session_start/2, session_read_stdout/1, session_read_stderr/1,
          session_write/2, session_resize/3, session_try_wait/1,
@@ -56,6 +56,18 @@ set_allow_listen(true) ->
     set_allow_listen_nif(1);
 set_allow_listen(false) ->
     set_allow_listen_nif(0).
+
+%% @doc Set a guest environment variable, layered over the default
+%% `PATH'/`HOME', for sandboxes created by subsequent runs and sessions.
+%% Setting a key that is already present overrides its value. `Key' and
+%% `Value' may be binaries or strings.
+-spec set_env(binary() | string(), binary() | string()) -> ok.
+set_env(Key, Value) when is_list(Key) ->
+    set_env(list_to_binary(Key), Value);
+set_env(Key, Value) when is_list(Value) ->
+    set_env(Key, list_to_binary(Value));
+set_env(Key, Value) when is_binary(Key), is_binary(Value) ->
+    set_env_nif(Key, Value).
 
 %% @doc Start a streaming session for `Cmd', draining stdout/stderr in the
 %% calling process until the command exits. Equivalent to
@@ -316,6 +328,9 @@ set_allow_network_nif(_Allow) ->
     erlang:nif_error(nif_not_loaded).
 
 set_allow_listen_nif(_Allow) ->
+    erlang:nif_error(nif_not_loaded).
+
+set_env_nif(_Key, _Value) ->
     erlang:nif_error(nif_not_loaded).
 
 session_start_nif(_Cmd, _Pty) ->

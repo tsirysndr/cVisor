@@ -31,6 +31,10 @@ const { symbols } = dlopen(libraryPath(), {
     args: [FFIType.ptr, FFIType.i32],
     returns: FFIType.void,
   },
+  cvisor_sandbox_set_env: {
+    args: [FFIType.ptr, FFIType.cstring, FFIType.cstring],
+    returns: FFIType.void,
+  },
   cvisor_sandbox_write_file: {
     args: [FFIType.ptr, FFIType.cstring, FFIType.ptr, FFIType.u64],
     returns: FFIType.i32,
@@ -162,6 +166,11 @@ export class Sandbox {
   /** Enable or disable inbound TCP servers — bind fixed port, listen (default off). */
   setAllowListen(allow: boolean): void {
     symbols.cvisor_sandbox_set_allow_listen(this.ptr, allow ? 1 : 0);
+  }
+
+  /** Set an environment variable for the guest (applies to subsequent runs). */
+  setEnv(key: string, value: string): void {
+    symbols.cvisor_sandbox_set_env(this.ptr, cstr(key), cstr(value));
   }
 
   /** Write a file into the sandbox overlay (visible to later runs of this sandbox). */

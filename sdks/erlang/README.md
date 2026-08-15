@@ -58,6 +58,13 @@ ok
 7> %% subsequent runs and sessions (denied by default).
 7> cvisor:set_allow_listen(true).
 ok
+
+8> %% Set a guest env var (layered over the default PATH/HOME) for
+8> %% subsequent runs and sessions. Setting an existing key overrides it.
+8> cvisor:set_env(<<"FOO">>, <<"bar">>).
+ok
+8> cvisor:run(<<"echo $FOO">>).
+{ok,<<"bar\n">>,<<>>,0}
 ```
 
 `cvisor:run/1` accepts a binary or a string, blocks until the sandboxed
@@ -69,6 +76,10 @@ signal. `cvisor:run/2` takes a timeout in milliseconds (0 = no limit).
 created by subsequent runs. `cvisor:set_allow_listen/1` likewise takes a
 boolean and controls whether sandboxes may run inbound TCP servers (bind a
 fixed port, `listen`, `accept`); it is denied by default.
+`cvisor:set_env/2` sets a guest environment variable (`Key` and `Value` as
+binaries or strings), layered over the default `PATH`/`HOME` and applied to
+sandboxes created by subsequent runs and sessions; setting a key that already
+exists overrides its value.
 
 From Elixir:
 

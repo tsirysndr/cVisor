@@ -35,6 +35,7 @@ mod imp {
         log_level: AtomicU8,
         allow_network: AtomicBool,
         allow_listen: AtomicBool,
+        env: std::sync::Mutex<Vec<(String, String)>>,
     }
 
     impl Sandbox {
@@ -65,6 +66,7 @@ mod imp {
             log_level: AtomicU8::new(0),
             allow_network: AtomicBool::new(true),
             allow_listen: AtomicBool::new(false),
+            env: std::sync::Mutex::new(Vec::new()),
         })
     }
 
@@ -76,6 +78,16 @@ mod imp {
     #[napi(js_name = "sandboxSetAllowListen")]
     pub fn sandbox_set_allow_listen(sandbox: ExternalRef<Sandbox>, allow: bool) {
         sandbox.allow_listen.store(allow, Ordering::Relaxed);
+    }
+
+    #[napi(js_name = "sandboxSetEnv")]
+    pub fn sandbox_set_env(sandbox: ExternalRef<Sandbox>, key: String, value: String) {
+        let mut env = sandbox.env.lock().unwrap();
+        if let Some(e) = env.iter_mut().find(|(k, _)| *k == key) {
+            e.1 = value;
+        } else {
+            env.push((key, value));
+        }
     }
 
     #[napi(js_name = "sandboxWriteFile")]
@@ -191,6 +203,7 @@ mod imp {
         let opts = ExecOpts {
             allow_network: sandbox.allow_network.load(Ordering::Relaxed),
             allow_listen: sandbox.allow_listen.load(Ordering::Relaxed),
+            env: sandbox.env.lock().unwrap().clone(),
             timeout: timeout_ms
                 .filter(|ms| *ms > 0)
                 .map(|ms| Duration::from_millis(ms as u64)),
@@ -238,6 +251,7 @@ mod imp {
         let opts = ExecOpts {
             allow_network: sandbox.allow_network.load(Ordering::Relaxed),
             allow_listen: sandbox.allow_listen.load(Ordering::Relaxed),
+            env: sandbox.env.lock().unwrap().clone(),
             ..ExecOpts::default()
         };
         let (argv, mode) = if pty {

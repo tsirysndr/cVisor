@@ -15,6 +15,8 @@ run() ->
     {ok, _, _, 137} = cvisor:run(<<"sleep 30">>, 300),
     {ok, <<"hi\n">>, _, 0} =
         cvisor:run(<<"echo hi > /tmp/a.part && mv /tmp/a.part /tmp/a && grep hi /tmp/a">>),
+    ok = cvisor:set_env(<<"FOO">>, <<"bar">>),
+    {ok, <<"bar\n">>, _, 0} = cvisor:run(<<"echo $FOO">>),
     test_streaming(),
     test_shell(),
     test_session_files(),

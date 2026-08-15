@@ -72,6 +72,11 @@ export class Sandbox {
     native.sandboxSetAllowListen(this.ptr, allow);
   }
 
+  /** Set an environment variable for the guest (applies to subsequent runs). */
+  setEnv(key: string, value: string) {
+    native.sandboxSetEnv(this.ptr, key, value);
+  }
+
   /** Write a file into the sandbox overlay (visible to later runs of this sandbox). */
   writeFile(path: string, data: Uint8Array | string) {
     native.sandboxWriteFile(this.ptr, path, typeof data === "string" ? new TextEncoder().encode(data) : data);

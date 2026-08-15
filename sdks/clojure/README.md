@@ -37,6 +37,9 @@ idempotent.
 
 ;; Inbound TCP servers (bind fixed port, listen) — off by default:
 (cvisor/set-allow-listen! sb true)
+
+;; Environment variables for the guest:
+(cvisor/set-env! sb "TOKEN" "xyz")
 ```
 
 ## Files

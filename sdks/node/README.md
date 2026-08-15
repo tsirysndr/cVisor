@@ -62,6 +62,9 @@ sb.setAllowNetwork(false);
 
 // Inbound TCP servers (bind fixed port, listen) — off by default:
 sb.setAllowListen(true);
+
+// Environment variables for the guest:
+sb.setEnv("TOKEN", "xyz");
 ```
 
 ### Files

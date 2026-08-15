@@ -38,6 +38,7 @@ sockets) inside the sandbox (denied by default):
 
 ```ruby
 sb.set_allow_listen(true)  # allow inbound TCP servers
+sb.set_env("TOKEN", "xyz")  # environment variable for the guest
 ```
 
 ## Files

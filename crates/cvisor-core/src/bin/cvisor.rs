@@ -51,6 +51,7 @@ OPTIONS:
     --sandbox <name>    use a named, persistent sandbox (files survive across
                         invocations). Without it, runs are ephemeral; cp/cache
                         default to the sandbox named \"default\".
+    -e, --env KEY=VAL   set an environment variable for the guest (repeatable)
     --no-network        deny outbound INET/INET6 networking
     --allow-listen      permit inbound TCP servers (bind fixed port, listen)
     --timeout <ms>      SIGKILL the guest after <ms> milliseconds
@@ -146,6 +147,13 @@ OPTIONS:
                     break;
                 }
                 "--sandbox" => sandbox = Some(args.next().ok_or("--sandbox needs a name")?),
+                "-e" | "--env" => {
+                    let kv = args.next().ok_or("-e/--env needs KEY=VALUE")?;
+                    let (k, v) = kv
+                        .split_once('=')
+                        .ok_or(format!("-e/--env expects KEY=VALUE, got: {kv}"))?;
+                    exec.env.push((k.to_string(), v.to_string()));
+                }
                 "--no-network" => exec.allow_network = false,
                 "--allow-listen" => exec.allow_listen = true,
                 "--timeout" => {

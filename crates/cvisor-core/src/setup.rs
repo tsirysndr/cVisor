@@ -32,7 +32,7 @@ const GUEST_ENVP: &[&str] = &[
 ];
 
 /// Options controlling one sandboxed run.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct ExecOpts {
     /// Allow outbound INET/INET6 sockets (default true).
     pub allow_network: bool,
@@ -45,6 +45,9 @@ pub struct ExecOpts {
     /// they pass through to the guest's inherited stdout/stderr (terminal, PTY
     /// slave, pipe) — used by the CLI and PTY sessions.
     pub capture_stdio: bool,
+    /// Extra environment variables for the guest, layered over the defaults
+    /// (PATH/HOME); a key already in the defaults is overridden.
+    pub env: Vec<(String, String)>,
 }
 
 impl Default for ExecOpts {
@@ -54,6 +57,7 @@ impl Default for ExecOpts {
             allow_listen: false,
             timeout: None,
             capture_stdio: true,
+            env: Vec::new(),
         }
     }
 }
@@ -113,7 +117,7 @@ pub fn run_argv(
     stderr: Arc<LogBuffer>,
     opts: ExecOpts,
 ) -> SysResult<i32> {
-    let guest = fork_guest(uid, argv, None)?;
+    let guest = fork_guest(uid, argv, None, &opts.env)?;
     Ok(supervise_blocking(guest, stdout, stderr, opts))
 }
 
@@ -130,7 +134,35 @@ struct Guest {
 /// its own process-group leader (so the timeout watchdog can `kill(-pgid)`) and
 /// inherits the parent's stdio. The caller retains ownership of `tty_slave` and
 /// must drop its copy after this returns so the master sees HUP on child exit.
-fn fork_guest(uid: [u8; 16], argv: &[String], tty_slave: Option<RawFd>) -> SysResult<Guest> {
+/// The guest env: the fixed defaults, with `extra` layered on top (a key in
+/// both wins for `extra`), as `KEY=VALUE` C strings.
+fn build_envp(extra: &[(String, String)]) -> SysResult<Vec<CString>> {
+    let mut entries: Vec<(String, String)> = GUEST_ENVP
+        .iter()
+        .map(|s| {
+            let (k, v) = s.split_once('=').unwrap_or((s, ""));
+            (k.to_string(), v.to_string())
+        })
+        .collect();
+    for (k, v) in extra {
+        if let Some(e) = entries.iter_mut().find(|(ek, _)| ek == k) {
+            e.1 = v.clone();
+        } else {
+            entries.push((k.clone(), v.clone()));
+        }
+    }
+    entries
+        .iter()
+        .map(|(k, v)| CString::new(format!("{k}={v}")).map_err(|_| SysError(Errno::INVAL)))
+        .collect()
+}
+
+fn fork_guest(
+    uid: [u8; 16],
+    argv: &[String],
+    tty_slave: Option<RawFd>,
+    extra_env: &[(String, String)],
+) -> SysResult<Guest> {
     // Build EVERYTHING that allocates before fork(). In a multithreaded process
     // (the Node SDK, the test harness) another thread may hold the malloc lock
     // at fork time; the child inherits it locked, so any allocation in the child
@@ -146,10 +178,7 @@ fn fork_guest(uid: [u8; 16], argv: &[String], tty_slave: Option<RawFd>) -> SysRe
     argv_ptrs.push(std::ptr::null());
     let prog: &CStr = &argv_owned[0];
 
-    let envp_owned: Vec<CString> = GUEST_ENVP
-        .iter()
-        .map(|s| CString::new(*s).unwrap())
-        .collect();
+    let envp_owned = build_envp(extra_env)?;
     let mut envp: Vec<*const c_char> = envp_owned.iter().map(|c| c.as_ptr()).collect();
     envp.push(std::ptr::null());
 
@@ -224,7 +253,7 @@ fn supervise_blocking(
         stdout,
         stderr,
         overlay,
-        opts,
+        &opts,
     );
     run_and_reap(supervisor, child_pid, notify_fd, opts.timeout)
 }
@@ -236,7 +265,7 @@ fn make_supervisor(
     stdout: Arc<LogBuffer>,
     stderr: Arc<LogBuffer>,
     overlay: OverlayRoot,
-    opts: ExecOpts,
+    opts: &ExecOpts,
 ) -> Arc<Supervisor> {
     Arc::new(Supervisor::new(
         notify_raw,
@@ -377,7 +406,7 @@ pub fn spawn_session(
         }
     };
 
-    let guest = fork_guest(uid, argv, slave.as_ref().map(|s| s.as_raw_fd()))?;
+    let guest = fork_guest(uid, argv, slave.as_ref().map(|s| s.as_raw_fd()), &opts.env)?;
     // Parent closes its slave copy so the master sees HUP when the guest exits.
     drop(slave);
 
@@ -394,7 +423,7 @@ pub fn spawn_session(
         Arc::clone(&stdout),
         Arc::clone(&stderr),
         overlay,
-        opts,
+        &opts,
     );
 
     let exit = Arc::new(Mutex::new(None));
