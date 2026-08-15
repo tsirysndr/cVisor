@@ -32,9 +32,7 @@ mod imp {
 
     use std::time::Duration;
 
-    use cvisor_core::{
-        cleanup_overlay, execute_with, generate_uid, ExecOpts, LogBuffer, LogLevel,
-    };
+    use cvisor_core::{cleanup_overlay, execute_with, generate_uid, ExecOpts, LogBuffer, LogLevel};
 
     /// Opaque sandbox handle.
     pub struct Sandbox {

@@ -340,7 +340,10 @@ impl Supervisor {
         } else if Some(nr) == legacy::RENAME {
             // rename(old, new) -> renameat(AT_FDCWD, old, AT_FDCWD, new)
             let a = notif.data.args;
-            self.sys_renameat(&remap(notif, [AT_FDCWD_U64, a[0], AT_FDCWD_U64, a[1], 0, 0]))
+            self.sys_renameat(&remap(
+                notif,
+                [AT_FDCWD_U64, a[0], AT_FDCWD_U64, a[1], 0, 0],
+            ))
         } else if let Some(errno) = blocked_errno(nr) {
             // Escape hatches, inbound networking, privilege/resource-control:
             // denied with a fixed errno (see `blocked_errno`).
@@ -1301,7 +1304,10 @@ impl Supervisor {
                 }
                 (up_src, state.overlay.resolve_cow(&dst))
             }
-            BackendType::Tmp => (state.overlay.resolve_tmp(&src)?, state.overlay.resolve_tmp(&dst)?),
+            BackendType::Tmp => (
+                state.overlay.resolve_tmp(&src)?,
+                state.overlay.resolve_tmp(&dst)?,
+            ),
             _ => unreachable!(),
         };
         OverlayRoot::create_parent_dirs(&real_dst).map_err(|_| SysError(Errno::IO))?;
@@ -1332,7 +1338,10 @@ impl Supervisor {
                     && state.overlay.guest_path_exists(path);
                 (visible, state.overlay.is_guest_dir(path))
             }
-            BackendType::Tmp => (state.overlay.tmp_exists(path), state.overlay.is_tmp_dir(path)),
+            BackendType::Tmp => (
+                state.overlay.tmp_exists(path),
+                state.overlay.is_tmp_dir(path),
+            ),
             _ => (false, false),
         }
     }

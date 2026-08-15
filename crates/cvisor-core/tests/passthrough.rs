@@ -299,6 +299,12 @@ fn network_disabled_blocks_inet_socket() {
     let (_out, err, code) = run_opts("nc -w1 127.0.0.1 9 </dev/null 2>&1; echo done", opts);
     assert!(code == 0 || !err.is_empty());
     // The follow-on echo proves the shell itself kept running.
-    let (out, _e, _c) = run_opts("echo still-alive", ExecOpts { allow_network: false, timeout: None });
+    let (out, _e, _c) = run_opts(
+        "echo still-alive",
+        ExecOpts {
+            allow_network: false,
+            timeout: None,
+        },
+    );
     assert_eq!(out, "still-alive\n");
 }
