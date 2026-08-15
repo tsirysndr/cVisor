@@ -1,6 +1,6 @@
 {
   "name": "cvisor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "In-process Linux sandbox for Node, Bun, and Deno (napi + FFI over libcvisor)",
   "license": "MIT",
   "repository": {

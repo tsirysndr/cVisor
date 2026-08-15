@@ -5,7 +5,7 @@
             [deps-deploy.deps-deploy :as dd]))
 
 (def lib 'io.github.tsirysndr/cvisor)
-(def version "0.1.0")
+(def version "0.2.0")
 (def class-dir "target/classes")
 (def jar-file (format "target/cvisor-%s.jar" version))
 

@@ -1,6 +1,6 @@
 {
   "name": "@cvisor/linux-arm64-musl",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "cvisor native binaries (arm64, musl): libcvisor.node + libcvisor.so",
   "license": "MIT",
   "repository": {
