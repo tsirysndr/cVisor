@@ -71,6 +71,14 @@ impl File {
         self.backend.bind(addr)
     }
 
+    pub fn poll_readable(&self, timeout_ms: i32) -> SysResult<bool> {
+        self.backend.poll_readable(timeout_ms)
+    }
+
+    pub fn socket_is_nonblocking(&self) -> SysResult<bool> {
+        self.backend.socket_is_nonblocking()
+    }
+
     pub fn shutdown(&self, how: i32) -> SysResult<()> {
         self.backend.shutdown(how)
     }

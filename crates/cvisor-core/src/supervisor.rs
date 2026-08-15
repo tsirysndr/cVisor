@@ -33,6 +33,11 @@ use crate::virt::tombstones::Tombstones;
 const MAX_INFLIGHT: usize = 8;
 const IO_CHUNK: usize = 4096;
 const MAX_IOV: usize = 16;
+/// One poll slice for an interruptible blocking recv: the max time the
+/// supervisor waits before re-checking that the guest is still blocked on the
+/// syscall, so a signal delivered to the guest (e.g. `ping`'s interval SIGALRM)
+/// aborts the recv promptly instead of wedging it.
+const RECV_POLL_SLICE_MS: i32 = 100;
 /// Max guest path length copied in for `*at` handlers (Linux `PATH_MAX`).
 const PATH_MAX: usize = 4096;
 
@@ -1630,6 +1635,41 @@ impl Supervisor {
         Ok(notif::reply_success(notif.id, n as i64))
     }
 
+    /// Receive on a socket while keeping the wait interruptible. A plain blocking
+    /// recv runs in a supervisor worker, so a signal delivered to the *guest*
+    /// cannot unblock it — which deadlocks signal-paced tools (multi-packet
+    /// `ping` uses a SIGALRM interval timer to interrupt its blocking recv). We
+    /// instead recv non-blocking and `poll` in slices, aborting with `EINTR` the
+    /// moment the guest's notification is no longer valid (it was interrupted or
+    /// exited). No packet is consumed on abort, so the guest's retried recv still
+    /// sees it. Non-blocking sockets / `MSG_DONTWAIT` keep one-shot semantics.
+    fn recv_blocking(
+        &self,
+        file: &File,
+        buf: &mut [u8],
+        flags: i32,
+        mut src: Option<&mut [u8]>,
+        notif_id: u64,
+    ) -> SysResult<(usize, u32)> {
+        use crate::error::{Errno, SysError};
+        let nonblocking =
+            flags & libc::MSG_DONTWAIT != 0 || file.socket_is_nonblocking().unwrap_or(false);
+        if nonblocking {
+            return file.recv_from(buf, flags, src);
+        }
+        loop {
+            match file.recv_from(buf, flags | libc::MSG_DONTWAIT, src.as_deref_mut()) {
+                Err(e) if e.errno() == Errno::AGAIN => {
+                    let _ = file.poll_readable(RECV_POLL_SLICE_MS);
+                    if !self.notifier.id_valid(notif_id) {
+                        return Err(SysError(Errno::INTR));
+                    }
+                }
+                other => return other,
+            }
+        }
+    }
+
     fn sys_recvfrom(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
         use crate::error::{Errno, SysError};
         let caller = notif.pid as i32;
@@ -1648,10 +1688,12 @@ impl Supervisor {
         } else {
             Vec::new()
         };
-        let (n, src_len) = file.recv_from(
+        let (n, src_len) = self.recv_blocking(
+            &file,
             &mut buf,
             flags,
             if want_addr { Some(&mut src) } else { None },
+            notif.id,
         )?;
         self.mem.write_bytes(caller, buf_addr, &buf[..n])?;
         if want_addr {
@@ -1718,10 +1760,12 @@ impl Supervisor {
             Vec::new()
         };
         let mut buf = vec![0u8; IO_CHUNK];
-        let (n, src_len) = file.recv_from(
+        let (n, src_len) = self.recv_blocking(
+            &file,
             &mut buf,
             flags,
             if want_addr { Some(&mut src) } else { None },
+            notif.id,
         )?;
 
         // Scatter received bytes across the guest's iovecs.

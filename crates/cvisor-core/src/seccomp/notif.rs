@@ -89,9 +89,10 @@ pub fn reply_error(id: u64, errno: i32) -> SeccompNotifResp {
 }
 
 // The seccomp notify ioctls use magic '!' (0x21).
-// RECV/SEND are _IOWR; ADDFD is _IOW.
+// RECV/SEND are _IOWR; ID_VALID/ADDFD are _IOW.
 nix::ioctl_readwrite!(ioctl_notif_recv, b'!', 0, SeccompNotif);
 nix::ioctl_readwrite!(ioctl_notif_send, b'!', 1, SeccompNotifResp);
+nix::ioctl_write_ptr!(ioctl_notif_id_valid, b'!', 2, u64);
 nix::ioctl_write_ptr!(ioctl_notif_addfd, b'!', 3, SeccompNotifAddfd);
 
 /// Receive the next pending notification. Returns `Ok(None)` when the guest has
@@ -104,6 +105,15 @@ pub fn recv(notify_fd: RawFd) -> nix::Result<Option<SeccompNotif>> {
         Err(nix::errno::Errno::ENOENT) => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+/// Whether notification `id` is still live — i.e. the guest is still blocked
+/// waiting on this syscall. Returns false once the guest has been interrupted by
+/// a signal or has exited (the ioctl fails with ENOENT). Used to abort a
+/// long-running handler so a signal-paced guest is not left wedged.
+pub fn id_valid(notify_fd: RawFd, id: u64) -> bool {
+    // SAFETY: notify_fd is a valid seccomp listener; id is a live u64.
+    unsafe { ioctl_notif_id_valid(notify_fd, &id) }.is_ok()
 }
 
 /// Send a reply. ENOENT (task already gone) is treated as success.

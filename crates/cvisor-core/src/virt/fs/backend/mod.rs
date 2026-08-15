@@ -196,6 +196,34 @@ impl Backend {
         Ok(n as usize)
     }
 
+    /// Poll the socket for readability up to `timeout_ms` (negative = block).
+    /// Returns true if it became readable / hung up / errored.
+    pub fn poll_readable(&self, timeout_ms: i32) -> SysResult<bool> {
+        let fd = self.as_socket_fd()?;
+        let mut pfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: single valid pollfd.
+        let rc = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+        if rc < 0 {
+            return Err(last_errno());
+        }
+        Ok(pfd.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0)
+    }
+
+    /// Whether the socket is in non-blocking mode (O_NONBLOCK set).
+    pub fn socket_is_nonblocking(&self) -> SysResult<bool> {
+        let fd = self.as_socket_fd()?;
+        // SAFETY: F_GETFL on a valid fd.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 {
+            return Err(last_errno());
+        }
+        Ok(flags & libc::O_NONBLOCK != 0)
+    }
+
     /// recvfrom into `buf`; optionally fills `src` with the source address,
     /// returning (bytes, src_len).
     pub fn recv_from(

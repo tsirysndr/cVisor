@@ -7,6 +7,10 @@ use std::os::fd::RawFd;
 pub trait Notifier: Send + Sync {
     /// Inject supervisor fd `srcfd` into the guest at slot `newfd`.
     fn addfd(&self, id: u64, srcfd: RawFd, newfd: RawFd, cloexec: bool) -> SysResult<()>;
+
+    /// Whether notification `id` is still live (the guest is still blocked on
+    /// this syscall). False once it was interrupted by a signal or exited.
+    fn id_valid(&self, id: u64) -> bool;
 }
 
 /// Production notifier issuing the real ADDFD ioctl.
@@ -19,6 +23,10 @@ impl Notifier for IoctlNotifier {
         super::notif::addfd(self.notify_fd, id, srcfd, newfd, cloexec)
             .map_err(|e| SysError(Errno::from_raw(e as i32).unwrap_or(Errno::IO)))
     }
+
+    fn id_valid(&self, id: u64) -> bool {
+        super::notif::id_valid(self.notify_fd, id)
+    }
 }
 
 /// Test notifier: records nothing, always succeeds.
@@ -27,5 +35,9 @@ pub struct NoopNotifier;
 impl Notifier for NoopNotifier {
     fn addfd(&self, _id: u64, _srcfd: RawFd, _newfd: RawFd, _cloexec: bool) -> SysResult<()> {
         Ok(())
+    }
+
+    fn id_valid(&self, _id: u64) -> bool {
+        true
     }
 }

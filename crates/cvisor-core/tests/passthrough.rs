@@ -320,6 +320,18 @@ fn loopback_ping_socket_roundtrip() {
 }
 
 #[test]
+fn multi_packet_ping_does_not_hang() {
+    // Regression: an intercepted blocking recv ran synchronously in the
+    // supervisor, so `ping`'s SIGALRM interval timer (which paces packets by
+    // interrupting the blocking recv) could not unblock it — multi-packet ping
+    // wedged forever. recv_blocking now polls in interruptible slices. A short
+    // interval keeps the test quick; three packets must all round-trip.
+    let (out, _err, code) = run_code("ping -c3 -i 0.2 -W2 127.0.0.1");
+    assert_eq!(code, 0, "multi-packet ping failed/hung: {out:?}");
+    assert!(out.contains("3 packets received"), "ping output: {out:?}");
+}
+
+#[test]
 fn dns_resolver_can_bind_udp_socket() {
     // Regression: cVisor blocked bind() outright, so every DNS resolver died
     // with "bind: Operation not permitted" — the reason `wget https://host`
