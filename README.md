@@ -127,12 +127,40 @@ Prebuilt static binaries for linux x86_64 and aarch64 are attached to each
 ### Nix
 
 A [crane](https://github.com/ipetkov/crane)-based flake builds the CLI (all
-features) for `x86_64-linux` and `aarch64-linux`:
+features) for `x86_64-linux` and `aarch64-linux`. With flakes enabled:
 
 ```bash
-nix build github:tsirysndr/cVisor#cvisor   # build the CLI
-nix run   github:tsirysndr/cVisor -- uname -a
-nix develop                                # dev shell (rust toolchain + tools)
+nix run    github:tsirysndr/cVisor -- uname -a   # run without installing
+nix build  github:tsirysndr/cVisor#cvisor        # build -> ./result/bin/cvisor
+nix profile install github:tsirysndr/cVisor      # install into your profile
+nix develop github:tsirysndr/cVisor              # dev shell (rust toolchain + tools)
+```
+
+(If flakes aren't on yet, add `--extra-experimental-features 'nix-command flakes'`
+to each command, or enable them in `nix.conf`.)
+
+#### Speed it up with Cachix
+
+The flake builds the full feature set (zstd + the S3 cache backend), which pulls
+in C dependencies (`ring`, `zstd-sys`) — a cold build compiles a lot. The
+project pushes prebuilt store paths to a public [Cachix](https://cachix.org)
+cache, so pointing Nix at it turns the "build" into a download:
+
+```bash
+# one-time: install the cachix client and trust the cvisor cache
+nix profile install nixpkgs#cachix
+cachix use cvisor
+
+# now builds/runs pull prebuilt paths instead of compiling
+nix run github:tsirysndr/cVisor -- uname -a
+```
+
+`cachix use cvisor` adds the cache as a substituter and its public key to your
+Nix config. Alternatively, add it to `nix.conf` (or a flake `nixConfig`) by hand:
+
+```
+extra-substituters = https://cvisor.cachix.org
+extra-trusted-public-keys = cvisor.cachix.org-1:<key shown by `cachix use cvisor`>
 ```
 
 ## Examples
