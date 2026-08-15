@@ -5,6 +5,9 @@
 //! in the cow/tmp upper layer; reads prefer the upper layer, then fall through
 //! to the real (host) file for cow paths.
 
+use std::path::{Path, PathBuf};
+
+use crate::archive;
 use crate::error::{Errno, SysError, SysResult};
 use crate::virt::overlay_root::OverlayRoot;
 use crate::virt::path::{resolve_and_route, BackendType, ResolvedRoute};
@@ -75,6 +78,100 @@ pub fn read_file(uid: [u8; 16], guest_path: &str) -> SysResult<Vec<u8>> {
         BackendType::Proc | BackendType::Event => return Err(SysError(Errno::NOSYS)),
     };
     std::fs::read(&real).map_err(|e| io_errno(&e))
+}
+
+/// The real host path a *read* of `guest_path` resolves to (overlay upper copy
+/// if present, else the real host file for a cow path).
+pub(crate) fn read_real_path(uid: [u8; 16], guest_path: &str) -> SysResult<PathBuf> {
+    let overlay = OverlayRoot::new(uid).map_err(|e| io_errno(&e))?;
+    let (backend, normalized) = route(guest_path)?;
+    let p = match backend {
+        BackendType::Cow => {
+            let upper = overlay.resolve_cow(&normalized);
+            if OverlayRoot::path_exists_on_real_fs(&upper) {
+                upper
+            } else {
+                normalized
+            }
+        }
+        BackendType::Tmp => overlay.resolve_tmp(&normalized)?,
+        BackendType::Passthrough => normalized,
+        BackendType::Proc | BackendType::Event => return Err(SysError(Errno::NOSYS)),
+    };
+    Ok(PathBuf::from(p))
+}
+
+/// The overlay (upper-layer) directory into which a *write* of `guest_path`
+/// lands, created if missing. Used to pack/unpack a cached directory.
+pub(crate) fn write_real_dir(uid: [u8; 16], guest_path: &str) -> SysResult<PathBuf> {
+    let overlay = OverlayRoot::new(uid).map_err(|e| io_errno(&e))?;
+    let (backend, normalized) = route(guest_path)?;
+    let p = match backend {
+        BackendType::Cow => overlay.resolve_cow(&normalized),
+        BackendType::Tmp => overlay.resolve_tmp(&normalized)?,
+        _ => return Err(SysError(Errno::PERM)),
+    };
+    std::fs::create_dir_all(&p).map_err(|e| io_errno(&e))?;
+    Ok(PathBuf::from(p))
+}
+
+/// Join a guest directory path with a relative sub-path.
+fn join_guest(base: &str, rel: &Path) -> String {
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    format!("{}/{}", base.trim_end_matches('/'), rel)
+}
+
+/// Copy a host file or directory tree into the sandbox at `guest_dst`. A
+/// directory is walked respecting `.gitignore` / `.dockerignore`.
+pub fn copy_into(uid: [u8; 16], host_src: &Path, guest_dst: &str) -> SysResult<()> {
+    let meta = std::fs::symlink_metadata(host_src).map_err(|e| io_errno(&e))?;
+    if !meta.is_dir() {
+        let data = std::fs::read(host_src).map_err(|e| io_errno(&e))?;
+        return write_file(uid, guest_dst, &data);
+    }
+    for path in archive::walk(host_src)? {
+        let rel = path.strip_prefix(host_src).unwrap_or(&path);
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        let gpath = join_guest(guest_dst, rel);
+        let m = std::fs::symlink_metadata(&path).map_err(|e| io_errno(&e))?;
+        if m.is_dir() {
+            write_real_dir(uid, &gpath)?; // ensure (possibly empty) dir exists
+        } else {
+            let data = std::fs::read(&path).map_err(|e| io_errno(&e))?;
+            write_file(uid, &gpath, &data)?;
+        }
+    }
+    Ok(())
+}
+
+/// Copy a sandbox file or directory tree out to `host_dst`. For a directory,
+/// `host_dst` is created and populated; ignore files are respected.
+pub fn copy_out_of(uid: [u8; 16], guest_src: &str, host_dst: &Path) -> SysResult<()> {
+    let real = read_real_path(uid, guest_src)?;
+    let meta = std::fs::symlink_metadata(&real).map_err(|e| io_errno(&e))?;
+    if !meta.is_dir() {
+        let data = read_file(uid, guest_src)?;
+        return std::fs::write(host_dst, data).map_err(|e| io_errno(&e));
+    }
+    for path in archive::walk(&real)? {
+        let rel = path.strip_prefix(&real).unwrap_or(&path);
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        let target = host_dst.join(rel);
+        let m = std::fs::symlink_metadata(&path).map_err(|e| io_errno(&e))?;
+        if m.is_dir() {
+            std::fs::create_dir_all(&target).map_err(|e| io_errno(&e))?;
+        } else {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| io_errno(&e))?;
+            }
+            std::fs::copy(&path, &target).map_err(|e| io_errno(&e))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

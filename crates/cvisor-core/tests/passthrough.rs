@@ -507,3 +507,43 @@ fn host_written_file_visible_to_run_and_readback() {
 
     let _ = std::fs::remove_dir_all(format!("/tmp/.cvisor/sb/{}", String::from_utf8_lossy(&uid)));
 }
+
+#[test]
+fn cache_save_restore_across_sandboxes() {
+    use cvisor_core::{cache, write_file, Format};
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let src_uid = generate_uid();
+    let dst_uid = generate_uid();
+    let root = std::env::temp_dir().join(format!(
+        "cvisor-cache-test-{}",
+        String::from_utf8_lossy(&src_uid)
+    ));
+    let backend = cache::Backend::Disk { root: root.clone() };
+
+    // Seed a directory in one sandbox and cache it.
+    write_file(src_uid, "/tmp/proj/a.txt", b"alpha\n").unwrap();
+    write_file(src_uid, "/tmp/proj/sub/b.txt", b"beta\n").unwrap();
+    cache::save(src_uid, "/tmp/proj", "key1", &backend, Format::Gzip).unwrap();
+    assert!(cache::exists("key1", &backend, Format::Gzip).unwrap());
+
+    // Restore into a different sandbox; a run there sees the files.
+    cache::restore(dst_uid, "/tmp/proj", "key1", &backend, Format::Gzip).unwrap();
+    let stdout = Arc::new(LogBuffer::new());
+    let code = execute_with(
+        dst_uid,
+        LogLevel::Off,
+        "grep alpha /tmp/proj/a.txt && grep beta /tmp/proj/sub/b.txt",
+        Arc::clone(&stdout),
+        Arc::new(LogBuffer::new()),
+        ExecOpts::default(),
+    )
+    .unwrap();
+    assert_eq!(code, 0);
+    assert_eq!(String::from_utf8_lossy(&stdout.read()), "alpha\nbeta\n");
+
+    for uid in [src_uid, dst_uid] {
+        let _ =
+            std::fs::remove_dir_all(format!("/tmp/.cvisor/sb/{}", String::from_utf8_lossy(&uid)));
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

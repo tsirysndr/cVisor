@@ -24,52 +24,70 @@ mod imp {
     use std::time::Duration;
 
     use cvisor_core::{
-        exec_argv, generate_uid, read_file, run_argv, spawn_session, uid_from_name, write_file,
-        ExecOpts, LogBuffer, LogLevel, PtyMode,
+        cache, copy_into, copy_out_of, exec_argv, generate_uid, run_argv, spawn_session,
+        uid_from_name, ExecOpts, Format, LogBuffer, LogLevel, PtyMode,
     };
 
     const USAGE: &str = "\
 cvisor — in-process Linux sandbox
 
 USAGE:
-    cvisor [OPTIONS]                 open an interactive sandboxed shell
-    cvisor [OPTIONS] -- <cmd> [args] run a command in the sandbox
-    cvisor [OPTIONS] cp <SRC> <DST>  copy a file in/out of the sandbox
+    cvisor [OPTIONS]                     open an interactive sandboxed shell
+    cvisor [OPTIONS] -- <cmd> [args]     run a command in the sandbox
+    cvisor [OPTIONS] cp <SRC> <DST>      copy a file/dir in/out of the sandbox
+    cvisor [OPTIONS] cache save    <KEY> <sb:PATH>   back up a sandbox dir
+    cvisor [OPTIONS] cache restore <KEY> <sb:PATH>   restore into a sandbox dir
+    cvisor doctor                        check the host can run the sandbox
 
     In `cp`, prefix the sandbox side with `sb:` — e.g.
-        cvisor --sandbox dev cp ./app.py sb:/app/app.py   (host -> sandbox)
-        cvisor --sandbox dev cp sb:/app/out.txt ./out.txt (sandbox -> host)
+        cvisor --sandbox dev cp ./src sb:/app       (host -> sandbox, recursive)
+        cvisor --sandbox dev cp sb:/app/dist ./dist (sandbox -> host, recursive)
+    Directory copies and `cache save` skip paths matched by .gitignore /
+    .dockerignore.
 
 OPTIONS:
     --sandbox <name>    use a named, persistent sandbox (files survive across
-                        invocations). Without it, runs are ephemeral; `cp`
-                        defaults to the sandbox named \"default\".
+                        invocations). Without it, runs are ephemeral; cp/cache
+                        default to the sandbox named \"default\".
     --no-network        deny outbound INET/INET6 networking
     --allow-listen      permit inbound TCP servers (bind fixed port, listen)
     --timeout <ms>      SIGKILL the guest after <ms> milliseconds
+    --format <fmt>      cache archive format: gzip (default), zstd, estargz, none
+    --cache-backend <b> cache store: disk (default), disk:/path, or s3://bkt/prefix
     -h, --help          show this help
 ";
 
     enum Action {
         Run(Vec<String>),
         Interactive,
-        Cp { src: String, dst: String },
+        Cp {
+            src: String,
+            dst: String,
+        },
+        Cache {
+            restore: bool,
+            key: String,
+            path: String,
+        },
+        Doctor,
     }
 
     struct Opts {
         exec: ExecOpts,
         sandbox: Option<String>,
         action: Action,
+        format: Format,
+        cache_backend: String,
     }
 
     impl Opts {
         /// The overlay uid: the named sandbox, else ephemeral (random) for a
-        /// run/shell, or the "default" named sandbox for `cp`.
+        /// run/shell, or the "default" named sandbox for file/cache operations.
         fn uid(&self) -> [u8; 16] {
             match (&self.sandbox, &self.action) {
                 (Some(name), _) => uid_from_name(name),
-                (None, Action::Cp { .. }) => uid_from_name("default"),
-                (None, _) => generate_uid(),
+                (None, Action::Run(_) | Action::Interactive | Action::Doctor) => generate_uid(),
+                (None, _) => uid_from_name("default"),
             }
         }
     }
@@ -81,6 +99,8 @@ OPTIONS:
         };
         let mut sandbox = None;
         let mut action = Action::Interactive;
+        let mut format = Format::Gzip;
+        let mut cache_backend = String::new();
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--" => {
@@ -91,6 +111,22 @@ OPTIONS:
                     let src = args.next().ok_or("cp needs <SRC> <DST>")?;
                     let dst = args.next().ok_or("cp needs <DST>")?;
                     action = Action::Cp { src, dst };
+                    break;
+                }
+                "cache" => {
+                    let op = args.next().ok_or("cache needs save|restore")?;
+                    let restore = match op.as_str() {
+                        "save" => false,
+                        "restore" => true,
+                        other => return Err(format!("unknown cache op: {other}")),
+                    };
+                    let key = args.next().ok_or("cache needs <KEY> <sb:PATH>")?;
+                    let path = args.next().ok_or("cache needs <sb:PATH>")?;
+                    action = Action::Cache { restore, key, path };
+                    break;
+                }
+                "doctor" => {
+                    action = Action::Doctor;
                     break;
                 }
                 "--sandbox" => sandbox = Some(args.next().ok_or("--sandbox needs a name")?),
@@ -104,6 +140,13 @@ OPTIONS:
                         .map_err(|_| "--timeout value must be a number".to_string())?;
                     exec.timeout = Some(Duration::from_millis(ms));
                 }
+                "--format" => {
+                    let f = args.next().ok_or("--format needs a value")?;
+                    format = Format::parse(&f).ok_or(format!("unknown --format: {f}"))?;
+                }
+                "--cache-backend" => {
+                    cache_backend = args.next().ok_or("--cache-backend needs a value")?;
+                }
                 "-h" | "--help" => return Err(USAGE.to_string()),
                 other => return Err(format!("unknown option: {other}\n\n{USAGE}")),
             }
@@ -112,6 +155,8 @@ OPTIONS:
             exec,
             sandbox,
             action,
+            format,
+            cache_backend,
         })
     }
 
@@ -133,13 +178,54 @@ OPTIONS:
         match &opts.action {
             Action::Run(cmd) if !cmd.is_empty() => run_command(uid, cmd, opts.exec),
             Action::Cp { src, dst } => cmd_cp(uid, src, dst),
+            Action::Cache { restore, key, path } => {
+                cmd_cache(uid, *restore, key, path, opts.format, &opts.cache_backend)
+            }
+            Action::Doctor => cmd_doctor(),
             _ => run_interactive(uid, opts.exec),
+        }
+    }
+
+    /// `cvisor cache save|restore`: archive a sandbox directory to (or from) the
+    /// configured backend, keyed by name.
+    fn cmd_cache(
+        uid: [u8; 16],
+        restore: bool,
+        key: &str,
+        path: &str,
+        format: Format,
+        backend_spec: &str,
+    ) -> i32 {
+        let Some(sb_path) = path.strip_prefix("sb:") else {
+            eprintln!("cvisor: cache <sb:PATH> must be a sandbox path (prefix sb:)");
+            return 2;
+        };
+        let backend = match cache::Backend::parse(backend_spec) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("cvisor: bad --cache-backend: {e}");
+                return 2;
+            }
+        };
+        let res = if restore {
+            cache::restore(uid, sb_path, key, &backend, format)
+        } else {
+            cache::save(uid, sb_path, key, &backend, format)
+        };
+        match res {
+            Ok(()) => 0,
+            Err(e) => {
+                let verb = if restore { "restore" } else { "save" };
+                eprintln!("cvisor: cache {verb} failed: {e}");
+                1
+            }
         }
     }
 
     /// `cvisor cp`: copy a file in or out of the sandbox overlay. Exactly one of
     /// SRC/DST must be an `sb:`-prefixed sandbox path.
     fn cmd_cp(uid: [u8; 16], src: &str, dst: &str) -> i32 {
+        use std::path::Path;
         let src_sb = src.strip_prefix("sb:");
         let dst_sb = dst.strip_prefix("sb:");
         let result = match (src_sb, dst_sb) {
@@ -147,18 +233,12 @@ OPTIONS:
                 eprintln!("cvisor: cp needs exactly one `sb:` path (host <-> sandbox)");
                 return 2;
             }
-            // host -> sandbox
-            (None, Some(spath)) => std::fs::read(src)
-                .map_err(|e| format!("read {src}: {e}"))
-                .and_then(|data| {
-                    write_file(uid, spath, &data).map_err(|e| format!("write sb:{spath}: {e}"))
-                }),
-            // sandbox -> host
-            (Some(spath), None) => read_file(uid, spath)
-                .map_err(|e| format!("read sb:{spath}: {e}"))
-                .and_then(|data| {
-                    std::fs::write(dst, data).map_err(|e| format!("write {dst}: {e}"))
-                }),
+            // host -> sandbox (file or directory, recursive)
+            (None, Some(spath)) => copy_into(uid, Path::new(src), spath)
+                .map_err(|e| format!("cp into sb:{spath}: {e}")),
+            // sandbox -> host (file or directory, recursive)
+            (Some(spath), None) => copy_out_of(uid, spath, Path::new(dst))
+                .map_err(|e| format!("cp out of sb:{spath}: {e}")),
         };
         match result {
             Ok(()) => 0,
@@ -166,6 +246,131 @@ OPTIONS:
                 eprintln!("cvisor: {msg}");
                 1
             }
+        }
+    }
+
+    /// `cvisor doctor`: check that this host can run the sandbox, printing a
+    /// pass/fail line per prerequisite. Exit 0 only if all pass.
+    fn cmd_doctor() -> i32 {
+        println!("cvisor doctor\n");
+        let mut ok = true;
+        let mut check = |name: &str, pass: bool, detail: &str| {
+            let mark = if pass { "✔" } else { "✘" };
+            println!("  {mark} {name:<26} {detail}");
+            ok &= pass;
+        };
+
+        #[cfg(target_os = "linux")]
+        {
+            // Kernel + arch.
+            let uname = std::process::Command::new("uname").arg("-sr").output().ok();
+            let kernel = uname
+                .as_ref()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            check("linux kernel", !kernel.is_empty(), &kernel);
+
+            // seccomp user-notifier: try installing an all-trap filter in a child.
+            let (seccomp_ok, detail) = probe_seccomp_notif();
+            check("seccomp user-notifier", seccomp_ok, detail);
+
+            // pidfd_getfd (used to steal the guest's notify fd).
+            let pidfd =
+                unsafe { libc::syscall(libc::SYS_pidfd_open, std::process::id() as i32, 0) };
+            let pidfd_ok = pidfd >= 0;
+            if pidfd_ok {
+                unsafe { libc::close(pidfd as i32) };
+            }
+            check(
+                "pidfd_open",
+                pidfd_ok,
+                if pidfd_ok {
+                    "available"
+                } else {
+                    "missing (kernel < 5.3?)"
+                },
+            );
+
+            // /proc mounted (lazy thread discovery).
+            let proc_ok = std::path::Path::new("/proc/self/status").exists();
+            check("/proc mounted", proc_ok, if proc_ok { "yes" } else { "no" });
+
+            // A real end-to-end run: `echo` in the sandbox.
+            let run_ok = smoke_run();
+            check(
+                "sandbox smoke run",
+                run_ok,
+                if run_ok {
+                    "ok"
+                } else {
+                    "failed — is seccomp=unconfined set? (docker: --security-opt seccomp=unconfined)"
+                },
+            );
+        }
+        #[cfg(not(target_os = "linux"))]
+        check("linux", false, "cvisor runs on Linux only");
+
+        println!();
+        if ok {
+            println!("All checks passed.");
+            0
+        } else {
+            println!("Some checks failed — see above.");
+            1
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn probe_seccomp_notif() -> (bool, &'static str) {
+        // A child installs the notifier filter; if the syscall returns a fd the
+        // feature is present. The child exits immediately either way.
+        // SAFETY: fork; child only calls async-signal-safe syscalls then _exit.
+        let pid = unsafe { libc::fork() };
+        if pid == 0 {
+            unsafe {
+                libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+                // SECCOMP_SET_MODE_FILTER=1, FLAG_NEW_LISTENER=1<<3.
+                let mut insns = [libc::sock_filter {
+                    code: 0x06,
+                    jt: 0,
+                    jf: 0,
+                    k: 0x7fff_0000,
+                }];
+                let prog = libc::sock_fprog {
+                    len: 1,
+                    filter: insns.as_mut_ptr(),
+                };
+                let fd = libc::syscall(libc::SYS_seccomp, 1, 1u64 << 3, &prog as *const _);
+                libc::_exit(if fd >= 0 { 0 } else { 1 });
+            }
+        }
+        let mut status = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        let ok = libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0;
+        (
+            ok,
+            if ok {
+                "available"
+            } else {
+                "unavailable (need kernel ≥ 5.0 and seccomp=unconfined)"
+            },
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    fn smoke_run() -> bool {
+        let out = Arc::new(LogBuffer::new());
+        let err = Arc::new(LogBuffer::new());
+        match run_argv(
+            generate_uid(),
+            LogLevel::Off,
+            &exec_argv(&["true".to_string()]),
+            Arc::clone(&out),
+            err,
+            ExecOpts::default(),
+        ) {
+            Ok(code) => code == 0,
+            Err(_) => false,
         }
     }
 

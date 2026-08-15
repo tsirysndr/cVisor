@@ -6,6 +6,8 @@
 //! natively. Everything that touches kernel APIs is gated behind
 //! `cfg(target_os = "linux")` and is the source of truth only under Docker.
 
+pub mod archive;
+pub mod cache;
 pub mod error;
 pub mod fileio;
 pub mod log_buffer;
@@ -31,8 +33,9 @@ pub use setup::{
     ExecOpts, PtyMode, Session,
 };
 
+pub use archive::Format;
 pub use error::{Errno, SysError, SysResult};
-pub use fileio::{read_file, write_file};
+pub use fileio::{copy_into, copy_out_of, read_file, write_file};
 pub use log_buffer::LogBuffer;
 pub use types::{LogLevel, Stat};
 

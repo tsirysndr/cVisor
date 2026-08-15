@@ -20,6 +20,14 @@ path = "src/bin/smoke.rs"
 [features]
 # Panic on unimplemented syscalls instead of silently returning ENOSYS.
 fail-loudly = []
+# zstd archive compression. Off by default: zstd-sys is a C library that does
+# not cross-compile under cargo-zigbuild on a macOS host, so the distributed
+# musl builds stay pure-Rust (gzip/estargz/uncompressed). Enable on a host where
+# zstd-sys builds (e.g. native Linux) for `--format zstd` support.
+zstd = ["dep:zstd"]
+# S3 cache backend. Off by default (pulls a networking stack); enable for
+# `cache --backend s3://...`.
+s3 = ["dep:rust-s3"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
@@ -31,3 +39,8 @@ crossbeam-channel = { workspace = true }
 
 [dependencies]
 getrandom = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+zstd = { workspace = true, optional = true }
+ignore = { workspace = true }
+rust-s3 = { workspace = true, optional = true }
