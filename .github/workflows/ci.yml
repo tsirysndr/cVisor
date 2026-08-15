@@ -145,6 +145,19 @@ jobs:
               erlc -o ebin test/cvisor_test.erl &&
               erl -noshell -pa ebin -eval "cvisor_test:run()" -s init stop'
 
+      # Java FFM over libcvisor.so; needs JDK 22+. The musl JDK image + the
+      # Clojure CLI (installed on first run); loads the .so from resources/.
+      - name: Clojure SDK (Java FFM)
+        run: |
+          docker run --rm \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            -v "$PWD/sdks/clojure:/sdk" -w /sdk \
+            --entrypoint sh bellsoft/liberica-openjdk-alpine-musl:22 -c '
+              apk add --no-cache bash curl >/dev/null 2>&1 &&
+              curl -sLO https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh &&
+              bash linux-install.sh >/dev/null 2>&1 &&
+              clojure -M:test'
+
       # Node uses the napi module (libcvisor.node) in the Debian bun image;
       # cargo xtask run-node builds it and runs test.ts (which asserts + prints
       # NODE_SDK_OK).

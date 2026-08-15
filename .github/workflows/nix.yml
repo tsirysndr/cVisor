@@ -1,0 +1,32 @@
+name: nix
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: nix build (${{ matrix.system }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            system: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      # Builds the cvisor CLI (all features) via the crane flake for this
+      # system's Linux arch.
+      - name: nix build .#cvisor
+        run: nix build .#cvisor -L
+
+      - name: Smoke-check the binary
+        run: ./result/bin/cvisor --help | head -1

@@ -124,6 +124,17 @@ Or build it yourself from the repo `Dockerfile` (`docker build -t cvisor .`).
 Prebuilt static binaries for linux x86_64 and aarch64 are attached to each
 [GitHub Release](https://github.com/tsirysndr/cVisor/releases) (tag `v*`).
 
+### Nix
+
+A [crane](https://github.com/ipetkov/crane)-based flake builds the CLI (all
+features) for `x86_64-linux` and `aarch64-linux`:
+
+```bash
+nix build github:tsirysndr/cVisor#cvisor   # build the CLI
+nix run   github:tsirysndr/cVisor -- uname -a
+nix develop                                # dev shell (rust toolchain + tools)
+```
+
 ## Examples
 
 Here are a selection of full examples which currently work in cVisor:
