@@ -162,6 +162,11 @@ jobs:
       # but takes CVISOR_PATH to build against the local Erlang source — set here
       # so CI tests the in-repo runtime (../erlang, which Mix compiles via its
       # Makefile pre-hook). CVISOR_LIB points at the freshly built priv .so.
+      #
+      # The earlier Erlang step shares the sdks/ mount and leaves ebin/*.beam +
+      # priv/cvisor_nif.so built with erlang:alpine's OTP; rebar chokes reading
+      # those foreign-OTP beams and the NIF's ABI may not match this image's OTP.
+      # Wipe the Erlang dep's build artifacts so Mix/rebar rebuild everything.
       - name: Elixir SDK (cvisor_ex)
         run: |
           docker run --rm \
@@ -171,12 +176,14 @@ jobs:
             -v "$PWD/sdks:/sdks" -w /sdks/elixir \
             elixir:otp-27-alpine sh -c '
               apk add --no-cache build-base >/dev/null 2>&1 &&
+              rm -rf /sdks/erlang/ebin /sdks/erlang/_build /sdks/erlang/priv/cvisor_nif.so &&
               mix local.rebar --force >/dev/null && mix local.hex --force >/dev/null &&
-              mix deps.get >/dev/null && mix test'
+              mix deps.get --only test >/dev/null && mix test'
 
       # Gleam consumes the same Erlang runtime as a path dep (../erlang has a
       # gleam.toml); Gleam does not build the C NIF, so `make` it first, then
-      # `gleam test`.
+      # `gleam test`. Wipe the Erlang dep's build artifacts left by earlier BEAM
+      # steps so the NIF is rebuilt for this image's OTP (ABI must match).
       - name: Gleam SDK (gleam_cvisor)
         run: |
           docker run --rm \
@@ -185,6 +192,7 @@ jobs:
             -v "$PWD/sdks:/sdks" -w /sdks/gleam \
             ghcr.io/gleam-lang/gleam:v1.15.0-erlang-alpine sh -c '
               apk add --no-cache build-base >/dev/null 2>&1 &&
+              rm -rf /sdks/erlang/ebin /sdks/erlang/_build /sdks/erlang/priv/cvisor_nif.so /sdks/gleam/build &&
               make -C /sdks/erlang priv/cvisor_nif.so >/dev/null 2>&1 &&
               gleam test'
 
