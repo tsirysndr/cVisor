@@ -100,7 +100,14 @@ OPTIONS:
         // stay empty; they satisfy the API.
         let out = Arc::new(LogBuffer::new());
         let err = Arc::new(LogBuffer::new());
-        match run_argv(generate_uid(), LogLevel::Off, &exec_argv(&args), out, err, exec) {
+        match run_argv(
+            generate_uid(),
+            LogLevel::Off,
+            &exec_argv(&args),
+            out,
+            err,
+            exec,
+        ) {
             Ok(code) => code,
             Err(e) => {
                 eprintln!("cvisor: {e}");

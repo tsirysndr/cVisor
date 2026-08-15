@@ -17,6 +17,19 @@
 //!   uint8_t*       cvisor_output_stderr(CvisorOutput*, size_t* out_len);
 //!   void           cvisor_bytes_free(uint8_t* ptr, size_t len);
 //!
+//! Streaming sessions run the guest in the background so the caller can drain
+//! output as it arrives and (for a PTY) feed stdin. Each SDK builds its own
+//! stdout/stderr callbacks on top of the drain functions.
+//!   CvisorSession* cvisor_session_start(CvisorSandbox*, const char* cmd, int pty); // pty: 0=none 1=shell
+//!   uint8_t*       cvisor_session_read_stdout(CvisorSession*, size_t* out_len);    // drains; PTY = merged
+//!   uint8_t*       cvisor_session_read_stderr(CvisorSession*, size_t* out_len);
+//!   long           cvisor_session_write_stdin(CvisorSession*, const uint8_t*, size_t); // PTY only
+//!   void           cvisor_session_resize(CvisorSession*, uint16_t rows, uint16_t cols);
+//!   int            cvisor_session_try_wait(CvisorSession*, int* done);             // done=0 while running
+//!   int            cvisor_session_wait(CvisorSession*);                            // blocks -> exit code
+//!   void           cvisor_session_kill(CvisorSession*);
+//!   void           cvisor_session_free(CvisorSession*);
+//!
 //! `cvisor_run` blocks until the guest command exits, then the captured
 //! stdout/stderr are available in full via the `*_stdout`/`*_stderr` accessors
 //! (each returns a freshly allocated copy the caller must release with
@@ -32,7 +45,10 @@ mod imp {
 
     use std::time::Duration;
 
-    use cvisor_core::{cleanup_overlay, execute_with, generate_uid, ExecOpts, LogBuffer, LogLevel};
+    use cvisor_core::{
+        cleanup_overlay, execute_with, generate_uid, shell_argv, spawn_session, ExecOpts,
+        LogBuffer, LogLevel, PtyMode, Session,
+    };
 
     /// Opaque sandbox handle.
     pub struct Sandbox {
@@ -200,5 +216,124 @@ mod imp {
         // SAFETY: `ptr`/`len` came from copy_out (Box<[u8]> into_raw).
         let slice = std::slice::from_raw_parts_mut(ptr, len);
         drop(Box::from_raw(slice as *mut [u8]));
+    }
+
+    /// Start a background session. `pty`: 0 = plain (stdout/stderr captured for
+    /// drain), 1 = interactive shell on a PTY (merged output; stdin writable).
+    /// For pty=1 `cmd` is ignored and `/bin/sh -i` is run. NULL on error.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_session_start(
+        sb: *mut Sandbox,
+        cmd: *const c_char,
+        pty: c_int,
+    ) -> *mut Session {
+        let Some(sb) = sb.as_ref() else {
+            return std::ptr::null_mut();
+        };
+        let opts = ExecOpts {
+            allow_network: sb.allow_network,
+            ..ExecOpts::default()
+        };
+        let (argv, mode) = if pty != 0 {
+            (
+                vec!["/bin/sh".to_string(), "-i".to_string()],
+                PtyMode::Buffered,
+            )
+        } else {
+            if cmd.is_null() {
+                return std::ptr::null_mut();
+            }
+            // SAFETY: caller guarantees `cmd` is a valid NUL-terminated C string.
+            let Ok(cmd) = CStr::from_ptr(cmd).to_str() else {
+                return std::ptr::null_mut();
+            };
+            (shell_argv(cmd), PtyMode::None)
+        };
+        match spawn_session(sb.uid, sb.log_level, &argv, opts, mode) {
+            Ok(s) => Box::into_raw(Box::new(s)),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_session_read_stdout(
+        sess: *mut Session,
+        out_len: *mut usize,
+    ) -> *mut u8 {
+        let data = sess.as_ref().map(|s| s.read_stdout());
+        copy_out(data.as_ref(), out_len)
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_session_read_stderr(
+        sess: *mut Session,
+        out_len: *mut usize,
+    ) -> *mut u8 {
+        let data = sess.as_ref().map(|s| s.read_stderr());
+        copy_out(data.as_ref(), out_len)
+    }
+
+    /// Write to the guest's stdin (PTY sessions only). Returns bytes written, or
+    /// -1 on error.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_session_write_stdin(
+        sess: *mut Session,
+        data: *const u8,
+        len: usize,
+    ) -> isize {
+        let Some(sess) = sess.as_ref() else {
+            return -1;
+        };
+        if data.is_null() {
+            return -1;
+        }
+        // SAFETY: caller guarantees `data`/`len` describe a valid buffer.
+        let bytes = std::slice::from_raw_parts(data, len);
+        match sess.write_stdin(bytes) {
+            Ok(n) => n as isize,
+            Err(_) => -1,
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_session_resize(sess: *mut Session, rows: u16, cols: u16) {
+        if let Some(sess) = sess.as_ref() {
+            sess.resize(rows, cols);
+        }
+    }
+
+    /// Non-blocking exit-code poll. Sets `*done` to 1 and returns the exit code
+    /// once the guest has finished; otherwise sets `*done` to 0 and returns 0.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_session_try_wait(
+        sess: *mut Session,
+        done: *mut c_int,
+    ) -> c_int {
+        let code = sess.as_ref().and_then(|s| s.try_wait());
+        if let Some(d) = done.as_mut() {
+            *d = code.is_some() as c_int;
+        }
+        code.unwrap_or(0)
+    }
+
+    /// Block until the guest exits and return its exit code.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_session_wait(sess: *mut Session) -> c_int {
+        sess.as_ref().map(|s| s.wait()).unwrap_or(-1)
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_session_kill(sess: *mut Session) {
+        if let Some(sess) = sess.as_ref() {
+            sess.kill();
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_session_free(sess: *mut Session) {
+        if !sess.is_null() {
+            // SAFETY: `sess` came from cvisor_session_start (Box::into_raw).
+            drop(Box::from_raw(sess));
+        }
     }
 }

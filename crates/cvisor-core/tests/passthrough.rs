@@ -307,7 +307,7 @@ fn network_disabled_blocks_inet_socket() {
         ExecOpts {
             allow_network: false,
             timeout: None,
-        capture_stdio: true,
+            capture_stdio: true,
         },
     );
     assert_eq!(out, "still-alive\n");

@@ -77,14 +77,7 @@ pub fn execute_with(
     stderr: Arc<LogBuffer>,
     opts: ExecOpts,
 ) -> SysResult<i32> {
-    run_argv(
-        uid,
-        log_level,
-        &shell_argv(cmd),
-        stdout,
-        stderr,
-        opts,
-    )
+    run_argv(uid, log_level, &shell_argv(cmd), stdout, stderr, opts)
 }
 
 /// `argv` for running a shell command string: `/bin/sh -c <cmd>`.
@@ -221,7 +214,14 @@ fn supervise_blocking(
         notify_fd,
         overlay,
     } = guest;
-    let supervisor = make_supervisor(notify_fd.as_raw_fd(), child_pid, stdout, stderr, overlay, opts);
+    let supervisor = make_supervisor(
+        notify_fd.as_raw_fd(),
+        child_pid,
+        stdout,
+        stderr,
+        overlay,
+        opts,
+    );
     run_and_reap(supervisor, child_pid, notify_fd, opts.timeout)
 }
 
