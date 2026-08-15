@@ -56,6 +56,28 @@ if (isInteractive) {
     "atomic rename",
   );
   assert(sb.runCmd("sleep 30", { timeoutMs: 300 }).exitCode === 137, "timeout kills with 137");
+
+  // Streaming session with an stdout callback.
+  const chunks: string[] = [];
+  const streamCode = await new Sandbox().runStreaming(
+    "for i in 1 2 3; do echo line$i; sleep 0.1; done",
+    { onStdout: (s) => chunks.push(s) },
+  );
+  assert(streamCode === 0, "streaming exit code");
+  assert(chunks.join("") === "line1\nline2\nline3\n", "streaming output");
+
+  // Interactive PTY shell.
+  let shellOut = "";
+  const shell = new Sandbox().shell({ onOutput: (s) => (shellOut += s) });
+  shell.write("echo SHELL_OK\n");
+  shell.write("test -t 1 && echo IS_TTY\n");
+  shell.write("exit 4\n");
+  const shellCode = await shell.wait();
+  await new Promise((r) => setTimeout(r, 100));
+  assert(shellCode === 4, "shell exit code");
+  assert(shellOut.includes("SHELL_OK") && shellOut.includes("IS_TTY"), "shell output");
+  shell.close();
+
   console.log("NODE_SDK_OK");
 
   const cmds = [

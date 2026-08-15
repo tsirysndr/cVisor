@@ -18,7 +18,10 @@ mod imp {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use cvisor_core::{cleanup_overlay, execute_with, generate_uid, ExecOpts, LogBuffer, LogLevel};
+    use cvisor_core::{
+        cleanup_overlay, execute_with, generate_uid, shell_argv, spawn_session, ExecOpts,
+        LogBuffer, LogLevel, PtyMode, Session,
+    };
     use napi::bindgen_prelude::{External, ExternalRef, Object, Uint8Array};
     use napi::Env;
     use napi_derive::napi;
@@ -125,5 +128,72 @@ mod imp {
         } else {
             Some(Uint8Array::new(data))
         }
+    }
+
+    /// Start a background session. `pty` true runs an interactive `/bin/sh -i`
+    /// on a pseudo-terminal (merged output; stdin writable); false runs `cmd`
+    /// via `/bin/sh -c` with stdout/stderr captured for drain.
+    #[napi(js_name = "sessionStart")]
+    pub fn session_start(
+        sandbox: ExternalRef<Sandbox>,
+        cmd: Option<String>,
+        pty: bool,
+    ) -> napi::Result<External<Session>> {
+        let opts = ExecOpts {
+            allow_network: sandbox.allow_network.load(Ordering::Relaxed),
+            ..ExecOpts::default()
+        };
+        let (argv, mode) = if pty {
+            (
+                vec!["/bin/sh".to_string(), "-i".to_string()],
+                PtyMode::Buffered,
+            )
+        } else {
+            let c = cmd
+                .ok_or_else(|| napi::Error::from_reason("cmd required for a non-pty session"))?;
+            (shell_argv(&c), PtyMode::None)
+        };
+        spawn_session(sandbox.uid, sandbox.level(), &argv, opts, mode)
+            .map(External::new)
+            .map_err(|e| napi::Error::from_reason(format!("session start failed: {e}")))
+    }
+
+    #[napi(js_name = "sessionReadStdout")]
+    pub fn session_read_stdout(session: ExternalRef<Session>) -> Option<Uint8Array> {
+        let data = session.read_stdout();
+        (!data.is_empty()).then(|| Uint8Array::new(data))
+    }
+
+    #[napi(js_name = "sessionReadStderr")]
+    pub fn session_read_stderr(session: ExternalRef<Session>) -> Option<Uint8Array> {
+        let data = session.read_stderr();
+        (!data.is_empty()).then(|| Uint8Array::new(data))
+    }
+
+    #[napi(js_name = "sessionWriteStdin")]
+    pub fn session_write_stdin(
+        session: ExternalRef<Session>,
+        data: Uint8Array,
+    ) -> napi::Result<i64> {
+        session
+            .write_stdin(&data)
+            .map(|n| n as i64)
+            .map_err(|e| napi::Error::from_reason(format!("write_stdin failed: {e}")))
+    }
+
+    #[napi(js_name = "sessionResize")]
+    pub fn session_resize(session: ExternalRef<Session>, rows: u32, cols: u32) {
+        session.resize(rows as u16, cols as u16);
+    }
+
+    /// The guest's exit code once it has finished, else null.
+    #[napi(js_name = "sessionTryWait")]
+    pub fn session_try_wait(session: ExternalRef<Session>) -> Option<i32> {
+        session.try_wait()
+    }
+
+    #[napi(js_name = "sessionKill")]
+    pub fn session_kill(session: ExternalRef<Session>) {
+        session.kill();
     }
 }

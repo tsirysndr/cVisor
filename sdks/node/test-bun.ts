@@ -44,4 +44,30 @@ await eq(
   "network disabled keeps shell alive",
 );
 
+// Streaming session with an stdout callback.
+{
+  const sb2 = new Sandbox();
+  const chunks: string[] = [];
+  const code = await sb2.runStreaming("for i in 1 2 3; do echo line$i; sleep 0.1; done", {
+    onStdout: (s) => chunks.push(s),
+  });
+  assert(code === 0, "streaming exit code");
+  assert(chunks.join("") === "line1\nline2\nline3\n", `streaming output: ${JSON.stringify(chunks.join(""))}`);
+}
+
+// Interactive PTY shell.
+{
+  const sb3 = new Sandbox();
+  let out = "";
+  const shell = sb3.shell({ onOutput: (s) => (out += s) });
+  shell.write("echo SHELL_OK\n");
+  shell.write("test -t 1 && echo IS_TTY\n");
+  shell.write("exit 4\n");
+  const code = await shell.wait();
+  await new Promise((r) => setTimeout(r, 100));
+  assert(code === 4, `shell exit code: ${code}`);
+  assert(out.includes("SHELL_OK") && out.includes("IS_TTY"), `shell output: ${JSON.stringify(out)}`);
+  shell.close();
+}
+
 console.log("BUN_SDK_OK");

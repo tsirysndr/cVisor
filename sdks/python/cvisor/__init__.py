@@ -11,9 +11,21 @@ from __future__ import annotations
 import ctypes
 import os
 import platform
-from ctypes import c_char_p, c_int, c_size_t, c_uint8, c_uint64, c_void_p, POINTER
+import threading
+import time
+from ctypes import (
+    c_char_p,
+    c_int,
+    c_long,
+    c_size_t,
+    c_uint8,
+    c_uint16,
+    c_uint64,
+    c_void_p,
+    POINTER,
+)
 
-__all__ = ["Sandbox", "Output", "load_library"]
+__all__ = ["Sandbox", "Output", "Session", "load_library"]
 
 
 def _default_library_path() -> str:
@@ -70,6 +82,32 @@ def load_library(path: str | None = None) -> ctypes.CDLL:
     lib.cvisor_bytes_free.restype = None
     lib.cvisor_bytes_free.argtypes = [POINTER(c_uint8), c_size_t]
 
+    lib.cvisor_session_start.restype = c_void_p
+    lib.cvisor_session_start.argtypes = [c_void_p, c_char_p, c_int]
+
+    for fn in ("cvisor_session_read_stdout", "cvisor_session_read_stderr"):
+        f = getattr(lib, fn)
+        f.restype = POINTER(c_uint8)
+        f.argtypes = [c_void_p, POINTER(c_size_t)]
+
+    lib.cvisor_session_write_stdin.restype = c_long
+    lib.cvisor_session_write_stdin.argtypes = [c_void_p, POINTER(c_uint8), c_size_t]
+
+    lib.cvisor_session_resize.restype = None
+    lib.cvisor_session_resize.argtypes = [c_void_p, c_uint16, c_uint16]
+
+    lib.cvisor_session_try_wait.restype = c_int
+    lib.cvisor_session_try_wait.argtypes = [c_void_p, POINTER(c_int)]
+
+    lib.cvisor_session_wait.restype = c_int
+    lib.cvisor_session_wait.argtypes = [c_void_p]
+
+    lib.cvisor_session_kill.restype = None
+    lib.cvisor_session_kill.argtypes = [c_void_p]
+
+    lib.cvisor_session_free.restype = None
+    lib.cvisor_session_free.argtypes = [c_void_p]
+
     return lib
 
 
@@ -98,6 +136,70 @@ class Output:
     @property
     def stderr(self) -> str:
         return self.stderr_bytes.decode("utf-8", "replace")
+
+
+class Session:
+    """A live, streaming sandbox session.
+
+    Wraps an opaque ``CvisorSession*``. For a PTY session stdout and stderr are
+    merged (drain stdout; stderr is empty) and stdin can be written; for a plain
+    session the two streams are separate and stdin is unavailable.
+    """
+
+    def __init__(self, lib: ctypes.CDLL, ptr: int) -> None:
+        self._lib = lib
+        self._ptr = ptr
+
+    def _read(self, accessor) -> bytes:
+        n = c_size_t(0)
+        ptr = accessor(self._ptr, ctypes.byref(n))
+        if not ptr or n.value == 0:
+            return b""
+        try:
+            return bytes(ctypes.cast(ptr, POINTER(c_uint8 * n.value)).contents)
+        finally:
+            self._lib.cvisor_bytes_free(ptr, n.value)
+
+    def read_stdout(self) -> bytes:
+        return self._read(self._lib.cvisor_session_read_stdout)
+
+    def read_stderr(self) -> bytes:
+        return self._read(self._lib.cvisor_session_read_stderr)
+
+    def write_stdin(self, data: bytes | str) -> int:
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        buf = (c_uint8 * len(data)).from_buffer_copy(data)
+        return self._lib.cvisor_session_write_stdin(self._ptr, buf, len(data))
+
+    def resize(self, rows: int, cols: int) -> None:
+        self._lib.cvisor_session_resize(self._ptr, rows, cols)
+
+    def exit_code(self) -> int | None:
+        """Return the exit code if the session has finished, else None."""
+        done = c_int(0)
+        code = self._lib.cvisor_session_try_wait(self._ptr, ctypes.byref(done))
+        return code if done.value else None
+
+    def wait(self) -> int:
+        return self._lib.cvisor_session_wait(self._ptr)
+
+    def kill(self) -> None:
+        self._lib.cvisor_session_kill(self._ptr)
+
+    def close(self) -> None:
+        if getattr(self, "_ptr", None):
+            self._lib.cvisor_session_free(self._ptr)
+            self._ptr = None
+
+    def __del__(self) -> None:
+        self.close()
+
+    def __enter__(self) -> "Session":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
 
 class Sandbox:
@@ -140,6 +242,65 @@ class Sandbox:
             return bytes(ctypes.cast(ptr, POINTER(c_uint8 * n.value)).contents)
         finally:
             self._lib.cvisor_bytes_free(ptr, n.value)
+
+    def run_streaming(self, command: str, on_stdout=None, on_stderr=None,
+                      poll_ms: int = 15) -> int:
+        """Run a command, streaming output to callbacks as it is produced.
+
+        Starts a non-PTY session and polls it: whenever new stdout/stderr bytes
+        arrive they are decoded (utf-8, errors="replace") and passed to the
+        matching callback. Returns the command's exit code."""
+        ptr = self._lib.cvisor_session_start(self._ptr, command.encode("utf-8"), 0)
+        if not ptr:
+            raise RuntimeError("failed to start session")
+        session = Session(self._lib, ptr)
+        try:
+            while True:
+                out = session.read_stdout()
+                if out and on_stdout is not None:
+                    on_stdout(out.decode("utf-8", "replace"))
+                err = session.read_stderr()
+                if err and on_stderr is not None:
+                    on_stderr(err.decode("utf-8", "replace"))
+                code = session.exit_code()
+                if code is not None:
+                    out = session.read_stdout()
+                    if out and on_stdout is not None:
+                        on_stdout(out.decode("utf-8", "replace"))
+                    err = session.read_stderr()
+                    if err and on_stderr is not None:
+                        on_stderr(err.decode("utf-8", "replace"))
+                    return code
+                time.sleep(poll_ms / 1000)
+        finally:
+            session.close()
+
+    def shell(self, on_output=None, poll_ms: int = 15) -> Session:
+        """Start an interactive PTY shell (/bin/sh -i) as a streaming session.
+
+        If ``on_output`` is given, a daemon thread drains merged output and
+        passes each decoded chunk (utf-8, errors="replace") to it until the
+        shell exits. Returns the Session so the caller can write_stdin/resize/
+        wait/close it."""
+        ptr = self._lib.cvisor_session_start(self._ptr, None, 1)
+        if not ptr:
+            raise RuntimeError("failed to start session")
+        session = Session(self._lib, ptr)
+        if on_output is not None:
+            def pump() -> None:
+                while True:
+                    out = session.read_stdout()
+                    if out:
+                        on_output(out.decode("utf-8", "replace"))
+                    if session.exit_code() is not None:
+                        out = session.read_stdout()
+                        if out:
+                            on_output(out.decode("utf-8", "replace"))
+                        return
+                    time.sleep(poll_ms / 1000)
+
+            threading.Thread(target=pump, daemon=True).start()
+        return session
 
     def close(self) -> None:
         if getattr(self, "_ptr", None):

@@ -20,4 +20,22 @@ assert_eq(sb.run("true").exit_code, 0, "exit code true")
 assert_eq(sb.run("echo hi > /tmp/a.part && mv /tmp/a.part /tmp/a && grep hi /tmp/a").stdout, "hi\n", "atomic rename")
 assert_eq(sb.run("sleep 30", timeout_ms: 300).exit_code, 137, "timeout kill")
 
+chunks = []
+code = sb.run_streaming("for i in 1 2 3; do echo line$i; sleep 0.1; done",
+                        on_stdout: ->(s) { chunks << s })
+assert_eq(code, 0, "streaming exit code")
+assert_eq(chunks.join, "line1\nline2\nline3\n", "streaming stdout")
+
+buf = []
+sh = sb.shell(on_output: ->(s) { buf << s })
+sh.write_stdin("echo SHELL_OK\n")
+sh.write_stdin("test -t 1 && echo IS_TTY\n")
+sh.write_stdin("exit 4\n")
+assert_eq(sh.wait, 4, "shell exit code")
+sleep 0.1
+merged = buf.join
+raise "shell missing SHELL_OK: #{merged.inspect}" unless merged.include?("SHELL_OK")
+raise "shell missing IS_TTY: #{merged.inspect}" unless merged.include?("IS_TTY")
+sh.close
+
 puts "RUBY_SDK_OK"

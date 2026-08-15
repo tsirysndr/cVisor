@@ -70,6 +70,70 @@ iex> :cvisor.run("echo hello from elixir")
 {:ok, "hello from elixir\n", "", 0}
 ```
 
+## Streaming & interactive shells
+
+`cvisor:run/1` buffers all output and returns once the command exits. For
+long-running commands you can instead stream output as it is produced, or open
+an interactive PTY shell you can type into. Both are built on a *session*: a
+sandbox plus a running command that you poll from Erlang.
+
+### run_streaming/1,2
+
+Runs a (non-PTY) command and invokes your callbacks with each chunk of output
+as it arrives, blocking the calling process until the command exits and
+returning its exit code:
+
+```erlang
+Code = cvisor:run_streaming(
+  <<"for i in 1 2 3; do echo line$i; sleep 0.1; done">>,
+  [{on_stdout, fun(Bin) -> io:put_chars(Bin) end},
+   {on_stderr, fun(Bin) -> io:put_chars(Bin) end},
+   {poll_ms, 15}]).
+%% prints line1 / line2 / line3 as they appear; Code = 0
+```
+
+Options (all optional): `{on_stdout, fun((binary()) -> any())}`,
+`{on_stderr, fun((binary()) -> any())}`, and `{poll_ms, integer()}` (poll
+interval in milliseconds, default 15). `run_streaming(Cmd)` is
+`run_streaming(Cmd, [])`.
+
+### shell/0,1
+
+Opens an interactive PTY shell (`/bin/sh -i`) and returns an opaque session
+handle. Output streams are merged (as with a real terminal), and stdin is
+writable, so the command sees a TTY (`test -t 1` succeeds):
+
+```erlang
+{ok, S} = cvisor:shell([{on_output, fun(Bin) -> io:put_chars(Bin) end}]),
+cvisor:session_write(S, <<"echo hello from the shell\n">>),
+cvisor:session_resize(S, 40, 120),
+cvisor:session_write(S, <<"exit 0\n">>),
+Code = cvisor:session_wait(S),   %% blocks until the shell exits
+cvisor:session_free(S).
+```
+
+Options: `{on_output, fun((binary()) -> any())}` (if given, a poller process
+is spawned that drains the merged output and calls the fun with each chunk
+until the shell exits) and `{poll_ms, integer()}` (default 15). `shell()` is
+`shell([])`. The caller owns the session and must call `session_free/1` when
+done (it is also freed automatically when the handle is garbage-collected).
+
+### Session functions
+
+The lower-level session API, used by both helpers above:
+
+| Function                       | Description                                                        |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `session_start(Cmd, Pty)`      | Start a session. `Pty` is `0` (plain command) or `1` (PTY shell).  |
+| `session_read_stdout(S)`       | Drain and return new stdout bytes (`<<>>` if none; merged for PTY).|
+| `session_read_stderr(S)`       | Drain and return new stderr bytes (empty for PTY sessions).        |
+| `session_write(S, Data)`       | Write to stdin (PTY only); returns bytes written or `-1`.          |
+| `session_resize(S, Rows, Cols)`| Resize the PTY window.                                             |
+| `session_try_wait(S)`          | Non-blocking: `{done, ExitCode}` or `running`.                    |
+| `session_wait(S)`              | Block (on a dirty I/O scheduler) until exit; returns the code.     |
+| `session_kill(S)`              | SIGKILL the session's command.                                     |
+| `session_free(S)`              | Free the session and its sandbox (idempotent).                     |
+
 ## Requirements
 
 - Linux (aarch64 or x86_64) with the seccomp user notifier

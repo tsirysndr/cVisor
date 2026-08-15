@@ -1,8 +1,32 @@
 import { External } from "./napi";
 import { native } from "./native";
 import { buildCommand, createOutput, Output, RunOptions } from "./output";
+import {
+  makeShell,
+  runStreaming as runStreamingImpl,
+  SessionNative,
+  Shell,
+  ShellOptions,
+  StreamOptions,
+} from "./session";
 
 export type { Output, RunOptions } from "./output";
+export type { Shell, ShellOptions, StreamOptions } from "./session";
+
+/** Bind a napi session handle to the runtime-agnostic SessionNative shape. */
+function napiSession(ptr: External<"Session">): SessionNative {
+  return {
+    readStdout: () => native.sessionReadStdout(ptr),
+    readStderr: () => native.sessionReadStderr(ptr),
+    writeStdin: (data) => native.sessionWriteStdin(ptr, data),
+    resize: (rows, cols) => native.sessionResize(ptr, rows, cols),
+    tryWait: () => native.sessionTryWait(ptr),
+    kill: () => native.sessionKill(ptr),
+    // napi has no explicit free; the handle's native Drop kills + joins on GC.
+    // kill() stops a still-running guest deterministically.
+    close: () => native.sessionKill(ptr),
+  };
+}
 
 class Stream {
   private ptr: External<"Stream">;
@@ -58,6 +82,24 @@ export class Sandbox {
    */
   sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
     return this.runCmd(buildCommand(strings, values));
+  }
+
+  /**
+   * Run a command in the background, streaming its output to `onStdout` /
+   * `onStderr` as it arrives. Resolves with the exit code.
+   */
+  runStreaming(command: string, options: StreamOptions = {}): Promise<number> {
+    const s = native.sessionStart(this.ptr, command, false);
+    return runStreamingImpl(napiSession(s), options);
+  }
+
+  /**
+   * Start an interactive `/bin/sh` on a PTY. Feed it with `shell.write(...)`,
+   * observe merged output via `onOutput`, and await `shell.wait()`.
+   */
+  shell(options: ShellOptions = {}): Shell {
+    const s = native.sessionStart(this.ptr, undefined, true);
+    return makeShell(napiSession(s), options);
   }
 }
 

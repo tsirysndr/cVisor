@@ -66,6 +66,48 @@ assert out.exit_code == 137
 sb.set_allow_network(False)  # deny outbound networking
 ```
 
+### Streaming output
+
+`Sandbox.run_streaming(cmd, on_stdout=..., on_stderr=..., poll_ms=15)` runs a
+command and delivers output to callbacks as it is produced, instead of buffering
+it all until exit. Each callback receives a decoded `str` chunk. Returns the
+exit code:
+
+```python
+with Sandbox() as sb:
+    sb.run_streaming(
+        "for i in 1 2 3; do echo line$i; sleep 0.1; done",
+        on_stdout=lambda s: print(s, end=""),
+    )
+```
+
+### Interactive PTY shell
+
+`Sandbox.shell(on_output=..., poll_ms=15)` starts an interactive `/bin/sh -i`
+session on a PTY (so `test -t 1` is true and programs behave as if attached to a
+terminal). It returns a `Session` you can drive:
+
+```python
+with Sandbox() as sb:
+    sh = sb.shell(on_output=lambda s: print(s, end=""))
+    sh.write_stdin("echo hello\n")
+    sh.resize(40, 120)          # rows, cols
+    sh.write_stdin("exit 0\n")
+    code = sh.wait()            # blocks for the exit code
+    sh.close()
+```
+
+`Session` methods:
+
+- `write_stdin(data)` — feed input (`bytes` or `str`); returns bytes written (PTY only).
+- `read_stdout()` / `read_stderr()` — drain and return new bytes (a PTY merges the
+  streams, so stderr is empty). `on_output` above does this for you on a daemon thread.
+- `resize(rows, cols)` — resize the PTY.
+- `exit_code()` — the exit code if the session has finished, else `None` (non-blocking).
+- `wait()` — block until exit and return the code.
+- `kill()` — SIGKILL the session.
+- `close()` — free the session (idempotent; also a context manager and on `__del__`).
+
 ## Interactive console
 
 Launch an IPython REPL with a live sandbox preloaded:

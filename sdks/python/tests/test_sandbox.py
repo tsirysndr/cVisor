@@ -6,6 +6,7 @@ cvisor/_native/ for packaging). Linux-only — skips elsewhere.
 
 import os
 import platform
+import time
 
 import pytest
 
@@ -61,3 +62,33 @@ def test_timeout():
     with Sandbox() as sb:
         out = sb.run("sleep 30", timeout_ms=300)
         assert out.exit_code == 137
+
+
+def test_run_streaming():
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        chunks = []
+        code = sb.run_streaming(
+            "for i in 1 2 3; do echo line$i; sleep 0.1; done",
+            on_stdout=chunks.append,
+        )
+        assert code == 0
+        assert "".join(chunks) == "line1\nline2\nline3\n"
+
+
+def test_shell_pty():
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        buf = []
+        sh = sb.shell(on_output=lambda s: buf.append(s))
+        sh.write_stdin("echo SHELL_OK\n")
+        sh.write_stdin("test -t 1 && echo IS_TTY\n")
+        sh.write_stdin("exit 4\n")
+        assert sh.wait() == 4
+        time.sleep(0.05)
+        text = "".join(buf)
+        assert "SHELL_OK" in text
+        assert "IS_TTY" in text
+        sh.close()

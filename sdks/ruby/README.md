@@ -33,6 +33,47 @@ the sandbox (allowed by default):
 sb.set_allow_network(false)  # deny outbound networking
 ```
 
+## Streaming sessions
+
+`Sandbox#run_streaming(command, on_stdout:, on_stderr:, poll_ms: 15)` starts a
+non-PTY session and streams output to the callbacks (each receives a UTF-8
+`String`) as it arrives, blocking until the command exits and returning its
+exit code:
+
+```ruby
+code = sb.run_streaming("for i in 1 2 3; do echo line$i; sleep 0.1; done",
+                        on_stdout: ->(s) { print s },
+                        on_stderr: ->(s) { warn s })
+puts code # 0
+```
+
+## Interactive PTY shell
+
+`Sandbox#shell(on_output: nil, poll_ms: 15)` starts an interactive PTY session
+(`/bin/sh -i`) and returns a `Cvisor::Session`. A PTY merges stdout and stderr,
+so all output arrives via `#read_stdout` (and the `on_output:` callback):
+
+```ruby
+buf = []
+sh = sb.shell(on_output: ->(s) { buf << s })
+sh.write_stdin("echo hello\n")   # bytes written (Integer)
+sh.resize(40, 120)               # rows, cols
+sh.write_stdin("exit 0\n")
+code = sh.wait                   # blocks -> exit code
+sh.close                         # free the session (idempotent)
+puts buf.join
+```
+
+`Cvisor::Session` methods:
+
+- `#read_stdout` / `#read_stderr` -> `String`: drain any new bytes (`""` when none). PTY sessions deliver everything on stdout.
+- `#write_stdin(data)` -> `Integer`: write `data` (a `String`) to the PTY, returns bytes written (PTY sessions only).
+- `#resize(rows, cols)`: resize the PTY window.
+- `#exit_code` -> `Integer` or `nil`: non-blocking; the exit code once finished, else `nil`.
+- `#wait` -> `Integer`: block until exit, returning the exit code.
+- `#kill`: SIGKILL the session's process.
+- `#close`: free the session (idempotent).
+
 ## Interactive console
 
 Launch an IRB session with a live sandbox preloaded:

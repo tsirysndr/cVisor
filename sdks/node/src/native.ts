@@ -27,6 +27,17 @@ export interface NativeModule {
     exitCode: number;
   };
   streamNext(stream: External<"Stream">): Uint8Array | null;
+  sessionStart(
+    sandbox: External<"Sandbox">,
+    cmd: string | undefined,
+    pty: boolean,
+  ): External<"Session">;
+  sessionReadStdout(session: External<"Session">): Uint8Array | null;
+  sessionReadStderr(session: External<"Session">): Uint8Array | null;
+  sessionWriteStdin(session: External<"Session">, data: Uint8Array): number;
+  sessionResize(session: External<"Session">, rows: number, cols: number): void;
+  sessionTryWait(session: External<"Session">): number | null;
+  sessionKill(session: External<"Session">): void;
 }
 
 const libc = familySync() === MUSL ? "musl" : "gnu";

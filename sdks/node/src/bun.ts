@@ -4,8 +4,17 @@
 import { dlopen, FFIType, ptr, toArrayBuffer, type Pointer } from "bun:ffi";
 import { libraryPath } from "./libpath";
 import { buildCommand, bytesToStream, createOutput, Output, RunOptions } from "./output";
+import {
+  makeShell,
+  runStreaming as runStreamingImpl,
+  SessionNative,
+  Shell,
+  ShellOptions,
+  StreamOptions,
+} from "./session";
 
 export type { Output, RunOptions } from "./output";
+export type { Shell, ShellOptions, StreamOptions } from "./session";
 
 const { symbols } = dlopen(libraryPath(), {
   cvisor_sandbox_new: { args: [], returns: FFIType.ptr },
@@ -34,7 +43,57 @@ const { symbols } = dlopen(libraryPath(), {
     returns: FFIType.ptr,
   },
   cvisor_bytes_free: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.void },
+  cvisor_session_start: {
+    args: [FFIType.ptr, FFIType.cstring, FFIType.i32],
+    returns: FFIType.ptr,
+  },
+  cvisor_session_read_stdout: {
+    args: [FFIType.ptr, FFIType.ptr],
+    returns: FFIType.ptr,
+  },
+  cvisor_session_read_stderr: {
+    args: [FFIType.ptr, FFIType.ptr],
+    returns: FFIType.ptr,
+  },
+  cvisor_session_write_stdin: {
+    args: [FFIType.ptr, FFIType.ptr, FFIType.u64],
+    returns: FFIType.i64,
+  },
+  cvisor_session_resize: {
+    args: [FFIType.ptr, FFIType.u16, FFIType.u16],
+    returns: FFIType.void,
+  },
+  cvisor_session_try_wait: {
+    args: [FFIType.ptr, FFIType.ptr],
+    returns: FFIType.i32,
+  },
+  cvisor_session_kill: { args: [FFIType.ptr], returns: FFIType.void },
+  cvisor_session_free: { args: [FFIType.ptr], returns: FFIType.void },
 });
+
+/** Bind a bun:ffi session pointer to the runtime-agnostic SessionNative shape. */
+function bunSession(sess: Pointer): SessionNative {
+  const drain = (accessor: (o: Pointer, lenPtr: Pointer) => Pointer | null) => {
+    const bytes = readOutput(sess, accessor);
+    return bytes.length > 0 ? bytes : null;
+  };
+  return {
+    readStdout: () => drain(symbols.cvisor_session_read_stdout),
+    readStderr: () => drain(symbols.cvisor_session_read_stderr),
+    writeStdin: (data) => {
+      const buf = Buffer.from(data);
+      return Number(symbols.cvisor_session_write_stdin(sess, ptr(buf), BigInt(buf.length)));
+    },
+    resize: (rows, cols) => symbols.cvisor_session_resize(sess, rows, cols),
+    tryWait: () => {
+      const done = new Int32Array(1);
+      const code = symbols.cvisor_session_try_wait(sess, ptr(done));
+      return done[0] ? code : null;
+    },
+    kill: () => symbols.cvisor_session_kill(sess),
+    close: () => symbols.cvisor_session_free(sess),
+  };
+}
 
 function readOutput(
   out: Pointer,
@@ -89,6 +148,21 @@ export class Sandbox {
   /** Tagged-template command runner: `sb.sh\`ls -l ${dir}\``. */
   sh(strings: TemplateStringsArray, ...values: unknown[]): Output {
     return this.runCmd(buildCommand(strings, values));
+  }
+
+  /** Run a command in the background, streaming output to the callbacks. */
+  runStreaming(command: string, options: StreamOptions = {}): Promise<number> {
+    const cmd = Buffer.from(command + "\0", "utf8");
+    const sess = symbols.cvisor_session_start(this.ptr, ptr(cmd), 0);
+    if (!sess) throw new Error("session start failed");
+    return runStreamingImpl(bunSession(sess), options);
+  }
+
+  /** Start an interactive `/bin/sh` on a PTY. */
+  shell(options: ShellOptions = {}): Shell {
+    const sess = symbols.cvisor_session_start(this.ptr, null, 1);
+    if (!sess) throw new Error("session start failed");
+    return makeShell(bunSession(sess), options);
   }
 
   close(): void {
