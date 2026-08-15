@@ -69,8 +69,8 @@
           outputHashMode = "recursive";
           outputHashAlgo = "sha256";
           outputHash = {
-            x86_64-linux = pkgs.lib.fakeHash;
-            aarch64-linux = pkgs.lib.fakeHash;
+            x86_64-linux = "sha256-X9fD9iRfGBb0W4nx8cupPr/0MB4Q127aAp7CCBApiXY=";
+            aarch64-linux = "sha256-X0koqpvn5tQLab/XpaKOeJEUuiRe90jtMnY1ROMfhak=";
           }.${system};
         };
 
@@ -102,8 +102,11 @@
           # Only the CLI, with all features (zstd archive + S3 cache backend).
           cargoExtraArgs = "--package cvisor-cli --bin cvisor --features zstd,s3";
           # zstd-sys and ring (S3 TLS) build their C with the stdenv compiler;
-          # ring's build needs perl.
-          nativeBuildInputs = [ pkgs.perl pkgs.pkg-config ];
+          # ring's build needs perl. cvisor-proto's build.rs needs protoc (the
+          # CLI depends on it for remote mode); point it at the packaged one so
+          # it doesn't fall back to the vendored glibc binary.
+          nativeBuildInputs = [ pkgs.perl pkgs.pkg-config pkgs.protobuf ];
+          PROTOC = "${pkgs.protobuf}/bin/protoc";
           # Sandbox tests need seccomp/fork; skip them in the pure build.
           doCheck = false;
         };

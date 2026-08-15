@@ -1,6 +1,18 @@
 fn main() {
-    // Use the vendored protoc so builds don't require a system protobuf install.
-    std::env::set_var("PROTOC", protoc_bin_vendored::protoc_bin_path().unwrap());
+    // protoc resolution: honor a caller-set PROTOC, else a system protoc on
+    // PATH, else the vendored binary. The vendored one is glibc-linked, so on
+    // musl (Alpine) it needs a system protoc (apk add protobuf) or gcompat; nix
+    // and other C-free environments set PROTOC to a packaged protoc.
+    if std::env::var_os("PROTOC").is_none() {
+        let system = std::process::Command::new("protoc")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !system {
+            std::env::set_var("PROTOC", protoc_bin_vendored::protoc_bin_path().unwrap());
+        }
+    }
     // Emit the file descriptor set so the daemon can serve gRPC reflection.
     let descriptor =
         std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("cvisor_descriptor.bin");
