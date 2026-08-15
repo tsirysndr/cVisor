@@ -1,6 +1,6 @@
 import { External } from "./napi";
 import { native } from "./native";
-import { buildCommand, CacheOptions, createOutput, Output, RunOptions } from "./output";
+import { buildCommand, CacheOptions, createOutput, Limits, Output, RunOptions } from "./output";
 import {
   makeShell,
   runStreaming as runStreamingImpl,
@@ -10,7 +10,7 @@ import {
   StreamOptions,
 } from "./session";
 
-export type { Output, RunOptions, CacheOptions } from "./output";
+export type { Output, RunOptions, CacheOptions, Limits } from "./output";
 export type { Shell, ShellOptions, StreamOptions } from "./session";
 
 /** Bind a napi session handle to the runtime-agnostic SessionNative shape. */
@@ -75,6 +75,16 @@ export class Sandbox {
   /** Set an environment variable for the guest (applies to subsequent runs). */
   setEnv(key: string, value: string) {
     native.sandboxSetEnv(this.ptr, key, value);
+  }
+
+  /** Cap guest resources via cgroup v2 (applies to subsequent runs). */
+  setLimits(limits: Limits) {
+    native.sandboxSetLimits(
+      this.ptr,
+      limits.memoryMax ?? 0,
+      limits.pidsMax ?? 0,
+      limits.cpuPercent ?? 0,
+    );
   }
 
   /** Write a file into the sandbox overlay (visible to later runs of this sandbox). */

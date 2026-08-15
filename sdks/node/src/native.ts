@@ -26,6 +26,12 @@ export interface NativeModule {
     key: string,
     value: string,
   ): void;
+  sandboxSetLimits(
+    sandbox: External<"Sandbox">,
+    memoryMax: number,
+    pidsMax: number,
+    cpuPercent: number,
+  ): void;
   sandboxWriteFile(
     sandbox: External<"Sandbox">,
     path: string,

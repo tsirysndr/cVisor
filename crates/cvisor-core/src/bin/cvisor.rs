@@ -55,6 +55,9 @@ OPTIONS:
     --no-network        deny outbound INET/INET6 networking
     --allow-listen      permit inbound TCP servers (bind fixed port, listen)
     --timeout <ms>      SIGKILL the guest after <ms> milliseconds
+    --memory <size>     cap guest memory, e.g. 256m, 1g (cgroup memory.max)
+    --pids <n>          cap number of guest processes (cgroup pids.max)
+    --cpu <percent>     cap guest CPU, percent of one core: 50, 200 (cgroup cpu.max)
     --format <fmt>      cache archive format: gzip (default), zstd, estargz, none
     --cache-backend <b> cache store: disk (default), disk:/path, or s3://bkt/prefix
     -h, --help          show this help
@@ -163,6 +166,29 @@ OPTIONS:
                         .parse::<u64>()
                         .map_err(|_| "--timeout value must be a number".to_string())?;
                     exec.timeout = Some(Duration::from_millis(ms));
+                }
+                "--memory" => {
+                    let v = args.next().ok_or("--memory needs a size (e.g. 256m)")?;
+                    exec.limits.memory_max = Some(
+                        cvisor_core::cgroup::parse_size(&v)
+                            .ok_or(format!("invalid --memory size: {v}"))?,
+                    );
+                }
+                "--pids" => {
+                    let n = args
+                        .next()
+                        .ok_or("--pids needs a number")?
+                        .parse::<u64>()
+                        .map_err(|_| "--pids value must be a number".to_string())?;
+                    exec.limits.pids_max = Some(n);
+                }
+                "--cpu" => {
+                    let p = args
+                        .next()
+                        .ok_or("--cpu needs a percent (e.g. 50)")?
+                        .parse::<u32>()
+                        .map_err(|_| "--cpu value must be a number".to_string())?;
+                    exec.limits.cpu_percent = Some(p);
                 }
                 "--format" => {
                     let f = args.next().ok_or("--format needs a value")?;

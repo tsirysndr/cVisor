@@ -60,4 +60,10 @@ sbe.set_env("FOO", "bar")
 sbe.set_env("GREETING", "hi there")
 assert_eq(sbe.run("echo $FOO-$GREETING").stdout, "bar-hi there\n", "set_env")
 
+# No writable cgroup v2 in the test container, so limits gracefully no-op;
+# a limited run must still succeed.
+sbl = Cvisor::Sandbox.new
+sbl.set_limits(memory_max: 256 * 1024 * 1024, pids_max: 128, cpu_percent: 50)
+assert_eq(sbl.run("echo limited").stdout, "limited\n", "set_limits")
+
 puts "RUBY_SDK_OK"

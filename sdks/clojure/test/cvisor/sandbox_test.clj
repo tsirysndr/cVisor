@@ -81,6 +81,13 @@
     (cvisor/set-env! sb "GREETING" "hi there")
     (is (= "bar-hi there\n" (:stdout (cvisor/run sb "echo $FOO-$GREETING"))))))
 
+(deftest resource-limits
+  ;; No writable cgroup v2 in the test container, so limits gracefully no-op;
+  ;; a limited run must still succeed.
+  (with-open [sb (cvisor/sandbox)]
+    (cvisor/set-limits! sb {:memory-max (* 256 1024 1024) :pids-max 128 :cpu-percent 50})
+    (is (= "limited\n" (:stdout (cvisor/run sb "echo limited"))))))
+
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'cvisor.sandbox-test)]
     (if (zero? (+ fail error))

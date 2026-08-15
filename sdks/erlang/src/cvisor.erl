@@ -7,7 +7,8 @@
 %% path, otherwise it is loaded from the application's priv directory.
 -module(cvisor).
 
--export([run/1, run/2, set_allow_network/1, set_allow_listen/1, set_env/2]).
+-export([run/1, run/2, set_allow_network/1, set_allow_listen/1, set_env/2,
+         set_limits/4]).
 -export([run_streaming/1, run_streaming/2, shell/0, shell/1]).
 -export([session_start/2, session_read_stdout/1, session_read_stderr/1,
          session_write/2, session_resize/3, session_try_wait/1,
@@ -68,6 +69,20 @@ set_env(Key, Value) when is_list(Value) ->
     set_env(Key, list_to_binary(Value));
 set_env(Key, Value) when is_binary(Key), is_binary(Value) ->
     set_env_nif(Key, Value).
+
+%% @doc Set guest cgroup resource limits for sandboxes created by subsequent
+%% runs and sessions. `MemoryMax' is the memory ceiling in bytes, `PidsMax' the
+%% maximum number of processes/threads, and `CpuPercent' the CPU quota as a
+%% percent of one core (50 = half a core, 200 = two cores). Any argument of 0
+%% leaves that limit unset. Limits require a writable cgroup v2 hierarchy; where
+%% one is unavailable they gracefully no-op.
+-spec set_limits(_Sandbox, non_neg_integer(), non_neg_integer(),
+                 non_neg_integer()) -> ok.
+set_limits(_Sandbox, MemoryMax, PidsMax, CpuPercent)
+  when is_integer(MemoryMax), MemoryMax >= 0,
+       is_integer(PidsMax), PidsMax >= 0,
+       is_integer(CpuPercent), CpuPercent >= 0 ->
+    set_limits_nif(MemoryMax, PidsMax, CpuPercent).
 
 %% @doc Start a streaming session for `Cmd', draining stdout/stderr in the
 %% calling process until the command exits. Equivalent to
@@ -331,6 +346,9 @@ set_allow_listen_nif(_Allow) ->
     erlang:nif_error(nif_not_loaded).
 
 set_env_nif(_Key, _Value) ->
+    erlang:nif_error(nif_not_loaded).
+
+set_limits_nif(_MemoryMax, _PidsMax, _CpuPercent) ->
     erlang:nif_error(nif_not_loaded).
 
 session_start_nif(_Cmd, _Pty) ->

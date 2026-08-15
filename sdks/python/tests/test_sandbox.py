@@ -156,3 +156,13 @@ def test_set_env():
         sb.set_env("FOO", "bar")
         sb.set_env("GREETING", "hi there")
         assert sb.run("echo $FOO-$GREETING").stdout == "bar-hi there\n"
+
+
+def test_set_limits():
+    # No writable cgroup v2 in the test container, so limits gracefully no-op;
+    # a limited run must still succeed.
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        sb.set_limits(memory_max=256 * 1024 * 1024, pids_max=128, cpu_percent=50)
+        assert sb.run("echo limited").stdout == "limited\n"

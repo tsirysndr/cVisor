@@ -48,6 +48,8 @@ pub struct ExecOpts {
     /// Extra environment variables for the guest, layered over the defaults
     /// (PATH/HOME); a key already in the defaults is overridden.
     pub env: Vec<(String, String)>,
+    /// Resource limits applied to the guest tree via a cgroup v2 leaf.
+    pub limits: crate::cgroup::Limits,
 }
 
 impl Default for ExecOpts {
@@ -58,6 +60,7 @@ impl Default for ExecOpts {
             timeout: None,
             capture_stdio: true,
             env: Vec::new(),
+            limits: crate::cgroup::Limits::default(),
         }
     }
 }
@@ -247,6 +250,12 @@ fn supervise_blocking(
         notify_fd,
         overlay,
     } = guest;
+    // Confine the guest tree to a resource-limited cgroup for the run; dropped
+    // (killed + removed) after reap.
+    let _cgroup = crate::cgroup::Cgroup::apply(&child_pid.to_string(), &opts.limits);
+    if let Some(cg) = &_cgroup {
+        cg.attach(child_pid);
+    }
     let supervisor = make_supervisor(
         notify_fd.as_raw_fd(),
         child_pid,
@@ -426,11 +435,17 @@ pub fn spawn_session(
         &opts,
     );
 
+    let cgroup = crate::cgroup::Cgroup::apply(&child_pid.to_string(), &opts.limits);
+    if let Some(cg) = &cgroup {
+        cg.attach(child_pid);
+    }
+
     let exit = Arc::new(Mutex::new(None));
     let exit_thread = Arc::clone(&exit);
     let timeout = opts.timeout;
     let supervisor_join = std::thread::spawn(move || {
         let code = run_and_reap(supervisor, child_pid, notify_fd, timeout);
+        drop(cgroup);
         *exit_thread.lock().unwrap() = Some(code);
     });
 

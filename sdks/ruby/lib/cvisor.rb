@@ -30,6 +30,7 @@ module Cvisor
     extern "void cvisor_sandbox_set_allow_network(void*, int)"
     extern "void cvisor_sandbox_set_allow_listen(void*, int)"
     extern "void cvisor_sandbox_set_env(void*, const char*, const char*)"
+    extern "void cvisor_sandbox_set_limits(void*, unsigned long long, unsigned long long, unsigned int)"
     extern "int cvisor_sandbox_write_file(void*, const char*, const char*, size_t)"
     extern "void* cvisor_sandbox_read_file(void*, const char*, void*)"
     extern "void* cvisor_run(void*, const char*)"
@@ -108,6 +109,13 @@ module Cvisor
     # Set an environment variable for the guest (applies to subsequent runs).
     def set_env(key, value)
       Native.cvisor_sandbox_set_env(@ptr, key.to_s, value.to_s)
+    end
+
+    # Cap guest resources via cgroup v2 (applies to subsequent runs).
+    # +memory_max+ is bytes, +pids_max+ a process count, +cpu_percent+ percent
+    # of one core (50 = half a core). 0 leaves that limit unset.
+    def set_limits(memory_max: 0, pids_max: 0, cpu_percent: 0)
+      Native.cvisor_sandbox_set_limits(@ptr, memory_max.to_i, pids_max.to_i, cpu_percent.to_i)
     end
 
     # Seed a file into the sandbox's persistent overlay at an absolute `path`;

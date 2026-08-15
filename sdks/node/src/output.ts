@@ -27,6 +27,16 @@ export interface RunOptions {
   timeoutMs?: number;
 }
 
+/** Guest resource limits (cgroup v2); omitted fields are unlimited. */
+export interface Limits {
+  /** Hard memory cap in bytes (memory.max). */
+  memoryMax?: number;
+  /** Max number of processes/threads in the guest tree (pids.max). */
+  pidsMax?: number;
+  /** CPU cap as a percentage of one core (cpu.max): 50 = half a core. */
+  cpuPercent?: number;
+}
+
 /** Options for cache save/restore. */
 export interface CacheOptions {
   /** "" / "disk" (default), "disk:/path", or "s3://bucket/prefix?...". */

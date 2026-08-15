@@ -3,7 +3,7 @@
 // Needs --allow-ffi (plus --allow-env for the CVISOR_LIB override).
 
 import { libraryPath } from "./libpath";
-import { buildCommand, bytesToStream, CacheOptions, createOutput, Output, RunOptions } from "./output";
+import { buildCommand, bytesToStream, CacheOptions, createOutput, Limits, Output, RunOptions } from "./output";
 import {
   makeShell,
   runStreaming as runStreamingImpl,
@@ -13,7 +13,7 @@ import {
   StreamOptions,
 } from "./session";
 
-export type { Output, RunOptions } from "./output";
+export type { Output, RunOptions, Limits } from "./output";
 export type { Shell, ShellOptions, StreamOptions } from "./session";
 
 // This package compiles without Deno's type definitions; the entry only ever
@@ -37,6 +37,10 @@ const lib = Deno.dlopen(libraryPath(), {
   },
   cvisor_sandbox_set_env: {
     parameters: ["pointer", "buffer", "buffer"],
+    result: "void",
+  },
+  cvisor_sandbox_set_limits: {
+    parameters: ["pointer", "u64", "u64", "u32"],
     result: "void",
   },
   cvisor_sandbox_write_file: {
@@ -167,6 +171,16 @@ export class Sandbox {
   /** Set an environment variable for the guest (applies to subsequent runs). */
   setEnv(key: string, value: string): void {
     lib.symbols.cvisor_sandbox_set_env(this.#ptr, cstr(key), cstr(value));
+  }
+
+  /** Cap guest resources via cgroup v2 (applies to subsequent runs). */
+  setLimits(limits: Limits): void {
+    lib.symbols.cvisor_sandbox_set_limits(
+      this.#ptr,
+      BigInt(limits.memoryMax ?? 0),
+      BigInt(limits.pidsMax ?? 0),
+      limits.cpuPercent ?? 0,
+    );
   }
 
   /** Write a file into the sandbox overlay (visible to later runs of this sandbox). */

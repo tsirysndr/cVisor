@@ -8,6 +8,7 @@
 
 pub mod archive;
 pub mod cache;
+pub mod cgroup;
 pub mod error;
 pub mod fileio;
 pub mod log_buffer;

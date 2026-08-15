@@ -19,9 +19,9 @@ mod imp {
     use std::time::Duration;
 
     use cvisor_core::{
-        cache, cleanup_overlay, copy_into, copy_out_of, execute_with, generate_uid, read_file,
-        shell_argv, spawn_session, write_file, ExecOpts, Format, LogBuffer, LogLevel, PtyMode,
-        Session,
+        cache, cgroup::Limits, cleanup_overlay, copy_into, copy_out_of, execute_with, generate_uid,
+        read_file, shell_argv, spawn_session, write_file, ExecOpts, Format, LogBuffer, LogLevel,
+        PtyMode, Session,
     };
     use napi::bindgen_prelude::{External, ExternalRef, Object, Uint8Array};
     use napi::Env;
@@ -36,6 +36,7 @@ mod imp {
         allow_network: AtomicBool,
         allow_listen: AtomicBool,
         env: std::sync::Mutex<Vec<(String, String)>>,
+        limits: std::sync::Mutex<Limits>,
     }
 
     impl Sandbox {
@@ -67,7 +68,23 @@ mod imp {
             allow_network: AtomicBool::new(true),
             allow_listen: AtomicBool::new(false),
             env: std::sync::Mutex::new(Vec::new()),
+            limits: std::sync::Mutex::new(Limits::default()),
         })
+    }
+
+    #[napi(js_name = "sandboxSetLimits")]
+    pub fn sandbox_set_limits(
+        sandbox: ExternalRef<Sandbox>,
+        memory_max: Option<i64>,
+        pids_max: Option<i64>,
+        cpu_percent: Option<i64>,
+    ) {
+        let pos = |v: Option<i64>| v.filter(|n| *n > 0);
+        *sandbox.limits.lock().unwrap() = Limits {
+            memory_max: pos(memory_max).map(|n| n as u64),
+            pids_max: pos(pids_max).map(|n| n as u64),
+            cpu_percent: pos(cpu_percent).map(|n| n as u32),
+        };
     }
 
     #[napi(js_name = "sandboxSetAllowNetwork")]
@@ -204,6 +221,7 @@ mod imp {
             allow_network: sandbox.allow_network.load(Ordering::Relaxed),
             allow_listen: sandbox.allow_listen.load(Ordering::Relaxed),
             env: sandbox.env.lock().unwrap().clone(),
+            limits: sandbox.limits.lock().unwrap().clone(),
             timeout: timeout_ms
                 .filter(|ms| *ms > 0)
                 .map(|ms| Duration::from_millis(ms as u64)),
@@ -252,6 +270,7 @@ mod imp {
             allow_network: sandbox.allow_network.load(Ordering::Relaxed),
             allow_listen: sandbox.allow_listen.load(Ordering::Relaxed),
             env: sandbox.env.lock().unwrap().clone(),
+            limits: sandbox.limits.lock().unwrap().clone(),
             ..ExecOpts::default()
         };
         let (argv, mode) = if pty {

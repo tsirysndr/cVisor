@@ -26,6 +26,7 @@ typedef void (*fn_bytes_free)(uint8_t *, size_t);
 typedef void (*fn_set_allow_network)(void *, int);
 typedef void (*fn_set_allow_listen)(void *, int);
 typedef void (*fn_set_env)(void *, const char *, const char *);
+typedef void (*fn_set_limits)(void *, uint64_t, uint64_t, uint32_t);
 typedef int (*fn_write_file)(void *, const char *, const uint8_t *, size_t);
 typedef uint8_t *(*fn_read_file)(void *, const char *, size_t *);
 typedef int (*fn_copy_into)(void *, const char *, const char *);
@@ -54,6 +55,7 @@ static fn_bytes_free p_bytes_free;
 static fn_set_allow_network p_set_allow_network;
 static fn_set_allow_listen p_set_allow_listen;
 static fn_set_env p_set_env;
+static fn_set_limits p_set_limits;
 static fn_write_file p_write_file;
 static fn_read_file p_read_file;
 static fn_copy_into p_copy_into;
@@ -94,11 +96,20 @@ static char *g_env_keys[G_ENV_CAP];
 static char *g_env_vals[G_ENV_CAP];
 static int g_env_count = 0;
 
-/* Set p_set_env for every var in the store, right after p_new(). */
+/* Process-global guest cgroup resource limits, applied to each sandbox before
+ * running. 0 means "leave that limit unset": g_mem_max is bytes, g_pids_max is
+ * a count, g_cpu_percent is percent of one core (50 = half a core). */
+static uint64_t g_mem_max = 0;
+static uint64_t g_pids_max = 0;
+static uint32_t g_cpu_percent = 0;
+
+/* Re-apply the process-global env store and resource limits, right after
+ * p_new() (each run/session gets a fresh sandbox handle). */
 static void apply_env(void *sb) {
     for (int i = 0; i < g_env_count; i++) {
         p_set_env(sb, g_env_keys[i], g_env_vals[i]);
     }
+    p_set_limits(sb, g_mem_max, g_pids_max, g_cpu_percent);
 }
 
 static int load_lib(void) {
@@ -122,6 +133,7 @@ static int load_lib(void) {
     p_set_allow_listen =
         (fn_set_allow_listen)dlsym(g_lib, "cvisor_sandbox_set_allow_listen");
     p_set_env = (fn_set_env)dlsym(g_lib, "cvisor_sandbox_set_env");
+    p_set_limits = (fn_set_limits)dlsym(g_lib, "cvisor_sandbox_set_limits");
     p_write_file = (fn_write_file)dlsym(g_lib, "cvisor_sandbox_write_file");
     p_read_file = (fn_read_file)dlsym(g_lib, "cvisor_sandbox_read_file");
     p_copy_into = (fn_copy_into)dlsym(g_lib, "cvisor_sandbox_copy_into");
@@ -145,7 +157,8 @@ static int load_lib(void) {
 
     return p_new && p_free && p_run_timeout && p_out_free && p_stdout &&
            p_stderr && p_exit_code && p_bytes_free && p_set_allow_network &&
-           p_set_allow_listen && p_set_env && p_write_file && p_read_file &&
+           p_set_allow_listen && p_set_env && p_set_limits && p_write_file &&
+           p_read_file &&
            p_copy_into && p_copy_out && p_cache_save && p_cache_restore &&
            p_session_start && p_session_read_stdout && p_session_read_stderr &&
            p_session_write_stdin && p_session_resize && p_session_try_wait &&
@@ -578,6 +591,24 @@ static ERL_NIF_TERM set_env_nif(ErlNifEnv *env, int argc,
     return enif_make_atom(env, "ok");
 }
 
+/* Set the process-global guest cgroup resource limits, applied to every
+ * sandbox created by subsequent runs and sessions. 0 leaves a limit unset:
+ * MemoryMax is bytes, PidsMax a count, CpuPercent percent of one core. */
+static ERL_NIF_TERM set_limits_nif(ErlNifEnv *env, int argc,
+                                   const ERL_NIF_TERM argv[]) {
+    ErlNifUInt64 mem_max, pids_max;
+    unsigned int cpu_percent;
+    if (argc != 3 || !enif_get_uint64(env, argv[0], &mem_max) ||
+        !enif_get_uint64(env, argv[1], &pids_max) ||
+        !enif_get_uint(env, argv[2], &cpu_percent)) {
+        return enif_make_badarg(env);
+    }
+    g_mem_max = (uint64_t)mem_max;
+    g_pids_max = (uint64_t)pids_max;
+    g_cpu_percent = (uint32_t)cpu_percent;
+    return enif_make_atom(env, "ok");
+}
+
 /* Map a 0 (ok) / nonzero (-errno) C return into ok | {error, Atom}. */
 static ERL_NIF_TERM rc_result(ErlNifEnv *env, int rc) {
     if (rc == 0) {
@@ -732,6 +763,7 @@ static ErlNifFunc nif_funcs[] = {
     {"set_allow_network_nif", 1, set_allow_network_nif, 0},
     {"set_allow_listen_nif", 1, set_allow_listen_nif, 0},
     {"set_env_nif", 2, set_env_nif, 0},
+    {"set_limits_nif", 3, set_limits_nif, 0},
     {"session_start_nif", 2, session_start_nif, 0},
     {"session_read_stdout_nif", 1, session_read_stdout_nif, 0},
     {"session_read_stderr_nif", 1, session_read_stderr_nif, 0},

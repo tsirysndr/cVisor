@@ -56,6 +56,7 @@
        :set-allow-network   (bind "cvisor_sandbox_set_allow_network" (fd nil ptr int32))
        :set-allow-listen    (bind "cvisor_sandbox_set_allow_listen" (fd nil ptr int32))
        :set-env             (bind "cvisor_sandbox_set_env" (fd nil ptr ptr ptr))
+       :set-limits          (bind "cvisor_sandbox_set_limits" (fd nil ptr size-t size-t int32))
        :write-file          (bind "cvisor_sandbox_write_file" (fd int32 ptr ptr ptr size-t))
        :read-file           (bind "cvisor_sandbox_read_file" (fd ptr ptr ptr ptr))
        :copy-into           (bind "cvisor_sandbox_copy_into" (fd int32 ptr ptr ptr))
@@ -137,6 +138,14 @@
   [^Sandbox sb ^String key ^String value]
   (with-open [arena (Arena/ofConfined)]
     (call :set-env (live-ptr sb) (.allocateFrom arena key) (.allocateFrom arena value))))
+
+(defn set-limits!
+  "Cap guest resources via cgroup v2. `opts` keys (any omitted/zero = no limit):
+  `:memory-max` bytes, `:pids-max` process count, `:cpu-percent` percent of one
+  core (50 = half a core). Applies to subsequent runs of the sandbox."
+  [^Sandbox sb {:keys [memory-max pids-max cpu-percent]
+                :or   {memory-max 0 pids-max 0 cpu-percent 0}}]
+  (call :set-limits (live-ptr sb) (long memory-max) (long pids-max) (int cpu-percent)))
 
 (defn write-file
   "Write bytes (or a String) to `path` inside the sandbox overlay. The file is

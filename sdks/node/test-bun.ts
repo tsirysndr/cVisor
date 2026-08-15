@@ -89,4 +89,12 @@ await eq(
   await eq(sbe.runCmd("echo $FOO-$GREETING"), "bar-hi there\n", "setEnv");
 }
 
+// Resource limits — no writable cgroup v2 in CI, so they gracefully no-op;
+// a limited run must still succeed.
+{
+  const sbl = new Sandbox();
+  sbl.setLimits({ memoryMax: 256 * 1024 * 1024, pidsMax: 128, cpuPercent: 50 });
+  await eq(sbl.runCmd("echo limited"), "limited\n", "setLimits");
+}
+
 console.log("BUN_SDK_OK");

@@ -17,11 +17,21 @@ run() ->
         cvisor:run(<<"echo hi > /tmp/a.part && mv /tmp/a.part /tmp/a && grep hi /tmp/a">>),
     ok = cvisor:set_env(<<"FOO">>, <<"bar">>),
     {ok, <<"bar\n">>, _, 0} = cvisor:run(<<"echo $FOO">>),
+    test_limits(),
     test_streaming(),
     test_shell(),
     test_session_files(),
     test_cache(),
     io:format("ERLANG_SDK_OK~n").
+
+%% Set a small pids limit and confirm a normal run still works. The test
+%% container has no writable cgroup v2, so the limit gracefully no-ops; this
+%% only proves the plumbing compiles and does not break a run.
+test_limits() ->
+    ok = cvisor:set_limits(undefined, 0, 100, 0),
+    {ok, <<"ok\n">>, _, 0} = cvisor:run(<<"echo ok">>),
+    ok = cvisor:set_limits(undefined, 0, 0, 0),
+    ok.
 
 %% Stream a command that emits lines over time; collect the stdout chunks and
 %% assert both the joined output and the exit code.

@@ -11,6 +11,7 @@
 //!   void           cvisor_sandbox_set_allow_network(CvisorSandbox*, int allow);  // 0=deny else allow
 //!   void           cvisor_sandbox_set_allow_listen(CvisorSandbox*, int allow);   // 0=deny else allow inbound TCP servers
 //!   void           cvisor_sandbox_set_env(CvisorSandbox*, const char* key, const char* value); // guest env var
+//!   void           cvisor_sandbox_set_limits(CvisorSandbox*, uint64_t mem_bytes, uint64_t pids, uint32_t cpu_pct); // cgroup; 0=unset
 //!   int            cvisor_sandbox_write_file(CvisorSandbox*, const char* path, const uint8_t*, size_t); // 0 ok, -errno
 //!   uint8_t*       cvisor_sandbox_read_file(CvisorSandbox*, const char* path, size_t* out_len);         // NULL on error
 //!   int            cvisor_sandbox_copy_into(CvisorSandbox*, const char* host, const char* guest);       // file/dir, 0 ok, -errno
@@ -54,9 +55,9 @@ mod imp {
     use std::time::Duration;
 
     use cvisor_core::{
-        cache, cleanup_overlay, copy_into, copy_out_of, execute_with, generate_uid, read_file,
-        shell_argv, spawn_session, write_file, ExecOpts, Format, LogBuffer, LogLevel, PtyMode,
-        Session,
+        cache, cgroup::Limits, cleanup_overlay, copy_into, copy_out_of, execute_with, generate_uid,
+        read_file, shell_argv, spawn_session, write_file, ExecOpts, Format, LogBuffer, LogLevel,
+        PtyMode, Session,
     };
 
     /// Opaque sandbox handle.
@@ -66,6 +67,7 @@ mod imp {
         allow_network: bool,
         allow_listen: bool,
         env: Vec<(String, String)>,
+        limits: Limits,
     }
 
     /// Opaque result handle holding the fully-captured output of one run.
@@ -83,7 +85,26 @@ mod imp {
             allow_network: true,
             allow_listen: false,
             env: Vec::new(),
+            limits: Limits::default(),
         }))
+    }
+
+    /// Set guest resource limits (cgroup v2). Any argument of 0 leaves that
+    /// limit unset: `memory_max` bytes, `pids_max` count, `cpu_percent` percent
+    /// of one core. Applies to subsequent runs/sessions.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_sandbox_set_limits(
+        sb: *mut Sandbox,
+        memory_max: u64,
+        pids_max: u64,
+        cpu_percent: u32,
+    ) {
+        let Some(sb) = sb.as_mut() else { return };
+        sb.limits = Limits {
+            memory_max: (memory_max > 0).then_some(memory_max),
+            pids_max: (pids_max > 0).then_some(pids_max),
+            cpu_percent: (cpu_percent > 0).then_some(cpu_percent),
+        };
     }
 
     /// Set an environment variable for the guest (layered over PATH/HOME;
@@ -165,6 +186,7 @@ mod imp {
             allow_network: sb.allow_network,
             allow_listen: sb.allow_listen,
             env: sb.env.clone(),
+            limits: sb.limits.clone(),
             timeout: (timeout_ms > 0).then(|| Duration::from_millis(timeout_ms)),
             ..ExecOpts::default()
         };
@@ -466,6 +488,7 @@ mod imp {
             allow_network: sb.allow_network,
             allow_listen: sb.allow_listen,
             env: sb.env.clone(),
+            limits: sb.limits.clone(),
             ..ExecOpts::default()
         };
         let (argv, mode) = if pty != 0 {

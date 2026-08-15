@@ -20,6 +20,7 @@ from ctypes import (
     c_size_t,
     c_uint8,
     c_uint16,
+    c_uint32,
     c_uint64,
     c_void_p,
     POINTER,
@@ -67,6 +68,9 @@ def load_library(path: str | None = None) -> ctypes.CDLL:
 
     lib.cvisor_sandbox_set_env.restype = None
     lib.cvisor_sandbox_set_env.argtypes = [c_void_p, c_char_p, c_char_p]
+
+    lib.cvisor_sandbox_set_limits.restype = None
+    lib.cvisor_sandbox_set_limits.argtypes = [c_void_p, c_uint64, c_uint64, c_uint32]
 
     lib.cvisor_sandbox_write_file.restype = c_int
     lib.cvisor_sandbox_write_file.argtypes = [c_void_p, c_char_p, POINTER(c_uint8), c_size_t]
@@ -248,6 +252,20 @@ class Sandbox:
         """Set an environment variable for the guest (applies to later runs)."""
         self._lib.cvisor_sandbox_set_env(
             self._ptr, key.encode("utf-8"), value.encode("utf-8")
+        )
+
+    def set_limits(
+        self,
+        memory_max: int = 0,
+        pids_max: int = 0,
+        cpu_percent: int = 0,
+    ) -> None:
+        """Cap guest resources via cgroup v2 (applies to later runs).
+
+        ``memory_max`` is bytes, ``pids_max`` a process count, ``cpu_percent``
+        percent of one core (50 = half a core). 0 leaves that limit unset."""
+        self._lib.cvisor_sandbox_set_limits(
+            self._ptr, memory_max, pids_max, cpu_percent
         )
 
     def write_file(self, path: str, data: bytes | str) -> None:

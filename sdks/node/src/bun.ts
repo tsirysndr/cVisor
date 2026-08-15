@@ -3,7 +3,7 @@
 
 import { dlopen, FFIType, ptr, toArrayBuffer, type Pointer } from "bun:ffi";
 import { libraryPath } from "./libpath";
-import { buildCommand, bytesToStream, CacheOptions, createOutput, Output, RunOptions } from "./output";
+import { buildCommand, bytesToStream, CacheOptions, createOutput, Limits, Output, RunOptions } from "./output";
 import {
   makeShell,
   runStreaming as runStreamingImpl,
@@ -13,7 +13,7 @@ import {
   StreamOptions,
 } from "./session";
 
-export type { Output, RunOptions } from "./output";
+export type { Output, RunOptions, Limits } from "./output";
 export type { Shell, ShellOptions, StreamOptions } from "./session";
 
 const { symbols } = dlopen(libraryPath(), {
@@ -33,6 +33,10 @@ const { symbols } = dlopen(libraryPath(), {
   },
   cvisor_sandbox_set_env: {
     args: [FFIType.ptr, FFIType.cstring, FFIType.cstring],
+    returns: FFIType.void,
+  },
+  cvisor_sandbox_set_limits: {
+    args: [FFIType.ptr, FFIType.u64, FFIType.u64, FFIType.u32],
     returns: FFIType.void,
   },
   cvisor_sandbox_write_file: {
@@ -171,6 +175,16 @@ export class Sandbox {
   /** Set an environment variable for the guest (applies to subsequent runs). */
   setEnv(key: string, value: string): void {
     symbols.cvisor_sandbox_set_env(this.ptr, cstr(key), cstr(value));
+  }
+
+  /** Cap guest resources via cgroup v2 (applies to subsequent runs). */
+  setLimits(limits: Limits): void {
+    symbols.cvisor_sandbox_set_limits(
+      this.ptr,
+      BigInt(limits.memoryMax ?? 0),
+      BigInt(limits.pidsMax ?? 0),
+      limits.cpuPercent ?? 0,
+    );
   }
 
   /** Write a file into the sandbox overlay (visible to later runs of this sandbox). */

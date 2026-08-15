@@ -275,6 +275,7 @@ fn timeout_kills_runaway_command() {
         timeout: Some(std::time::Duration::from_millis(300)),
         capture_stdio: true,
         env: Vec::new(),
+        ..ExecOpts::default()
     };
     let (_o, _e, code) = run_opts("sleep 30", opts);
     // SIGKILL from the watchdog -> 128 + 9.
@@ -289,6 +290,7 @@ fn command_under_timeout_completes_normally() {
         timeout: Some(std::time::Duration::from_millis(5000)),
         capture_stdio: true,
         env: Vec::new(),
+        ..ExecOpts::default()
     };
     let (out, _e, code) = run_opts("echo quick", opts);
     assert_eq!(out, "quick\n");
@@ -303,6 +305,7 @@ fn network_disabled_blocks_inet_socket() {
         timeout: None,
         capture_stdio: true,
         env: Vec::new(),
+        ..ExecOpts::default()
     };
     // Busybox nc opening an INET socket must fail with the egress kill switch on.
     let (_out, err, code) = run_opts("nc -w1 127.0.0.1 9 </dev/null 2>&1; echo done", opts);
@@ -316,6 +319,7 @@ fn network_disabled_blocks_inet_socket() {
             timeout: None,
             capture_stdio: true,
             env: Vec::new(),
+            ..ExecOpts::default()
         },
     );
     assert_eq!(out, "still-alive\n");
@@ -443,6 +447,7 @@ fn allow_listen_gates_fixed_port_bind() {
         capture_stdio: true,
         env: Vec::new(),
         timeout: None,
+        ..ExecOpts::default()
     };
     let (_o, err, _c) = run_opts("timeout 1 nc -l -p 7799", denied);
     assert!(
@@ -456,6 +461,7 @@ fn allow_listen_gates_fixed_port_bind() {
         capture_stdio: true,
         env: Vec::new(),
         timeout: None,
+        ..ExecOpts::default()
     };
     let (_o, err, _c) = run_opts("timeout 1 nc -l -p 7799", allowed);
     assert!(
@@ -571,4 +577,22 @@ fn env_vars_are_passed_and_override_defaults() {
     assert_eq!(lines.next(), Some("bar")); // extra var
     assert_eq!(lines.next(), Some("/custom")); // overrode the default HOME=/
     assert_eq!(lines.next(), Some("1")); // default PATH still present
+}
+
+#[test]
+fn resource_limits_do_not_break_a_run() {
+    // The test container has no writable cgroup v2, so limits gracefully no-op;
+    // the run must still succeed regardless of whether they were applied.
+    use cvisor_core::cgroup::Limits;
+    let opts = ExecOpts {
+        limits: Limits {
+            memory_max: Some(256 * 1024 * 1024),
+            pids_max: Some(128),
+            cpu_percent: Some(50),
+        },
+        ..ExecOpts::default()
+    };
+    let (out, _e, code) = run_opts("echo limited", opts);
+    assert_eq!(code, 0);
+    assert_eq!(out.trim(), "limited");
 }
