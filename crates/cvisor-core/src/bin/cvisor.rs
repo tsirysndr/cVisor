@@ -450,21 +450,34 @@ OPTIONS:
         }
     }
 
-    /// `cvisor` (no command): an interactive `/bin/sh` on a PTY. Falls back to a
-    /// plain sandboxed shell if stdin is not a terminal.
+    /// The interactive shell to launch: `bash` if present in the sandbox,
+    /// otherwise `/bin/sh`. cow paths read through to the host, so a host
+    /// `bash` is what the guest would exec.
+    fn interactive_shell() -> String {
+        for candidate in ["/bin/bash", "/usr/bin/bash"] {
+            if std::path::Path::new(candidate).exists() {
+                return candidate.to_string();
+            }
+        }
+        "/bin/sh".to_string()
+    }
+
+    /// `cvisor` (no command): an interactive shell on a PTY (bash if available,
+    /// else /bin/sh). Falls back to a plain sandboxed shell if stdin is not a
+    /// terminal.
     fn run_interactive(uid: [u8; 16], exec: ExecOpts) -> i32 {
+        let shell = interactive_shell();
         if !isatty(libc::STDIN_FILENO) {
             // Not a TTY (piped/redirected): run a shell reading the inherited fd 0.
             let out = Arc::new(LogBuffer::new());
             let err = Arc::new(LogBuffer::new());
-            return run_argv(uid, LogLevel::Off, &["/bin/sh".to_string()], out, err, exec)
-                .unwrap_or(1);
+            return run_argv(uid, LogLevel::Off, &[shell], out, err, exec).unwrap_or(1);
         }
 
         let session = match spawn_session(
             uid,
             LogLevel::Off,
-            &["/bin/sh".to_string(), "-i".to_string()],
+            &[shell, "-i".to_string()],
             exec,
             PtyMode::Raw,
         ) {
