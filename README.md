@@ -130,7 +130,7 @@ A [crane](https://github.com/ipetkov/crane)-based flake builds the CLI (all
 features) for `x86_64-linux` and `aarch64-linux`. With flakes enabled:
 
 ```bash
-nix run    github:tsirysndr/cVisor -- uname -a   # run without installing
+nix run    github:tsirysndr/cVisor               # run without installing
 nix build  github:tsirysndr/cVisor#cvisor        # build -> ./result/bin/cvisor
 nix profile install github:tsirysndr/cVisor      # install into your profile
 nix develop github:tsirysndr/cVisor              # dev shell (rust toolchain + tools)
