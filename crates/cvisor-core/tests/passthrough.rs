@@ -272,6 +272,7 @@ fn timeout_kills_runaway_command() {
     let opts = ExecOpts {
         allow_network: true,
         timeout: Some(std::time::Duration::from_millis(300)),
+        capture_stdio: true,
     };
     let (_o, _e, code) = run_opts("sleep 30", opts);
     // SIGKILL from the watchdog -> 128 + 9.
@@ -283,6 +284,7 @@ fn command_under_timeout_completes_normally() {
     let opts = ExecOpts {
         allow_network: true,
         timeout: Some(std::time::Duration::from_millis(5000)),
+        capture_stdio: true,
     };
     let (out, _e, code) = run_opts("echo quick", opts);
     assert_eq!(out, "quick\n");
@@ -294,6 +296,7 @@ fn network_disabled_blocks_inet_socket() {
     let opts = ExecOpts {
         allow_network: false,
         timeout: None,
+        capture_stdio: true,
     };
     // Busybox nc opening an INET socket must fail with the egress kill switch on.
     let (_out, err, code) = run_opts("nc -w1 127.0.0.1 9 </dev/null 2>&1; echo done", opts);
@@ -304,6 +307,7 @@ fn network_disabled_blocks_inet_socket() {
         ExecOpts {
             allow_network: false,
             timeout: None,
+        capture_stdio: true,
         },
     );
     assert_eq!(out, "still-alive\n");
@@ -345,4 +349,77 @@ fn dns_resolver_can_bind_udp_socket() {
         !combined.contains("Operation not permitted") && !combined.contains("bind:"),
         "resolver hit a blocked bind(): {combined:?}"
     );
+}
+
+#[test]
+fn passthrough_stdio_and_argv_exec() {
+    use cvisor_core::{exec_argv, run_argv};
+    // capture_stdio=false routes fd 1 writes back to the real (inherited) fd,
+    // so the log buffers stay empty; the argv form preserves arg boundaries.
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let out = Arc::new(LogBuffer::new());
+    let err = Arc::new(LogBuffer::new());
+    let opts = ExecOpts {
+        capture_stdio: false,
+        ..ExecOpts::default()
+    };
+    let code = run_argv(
+        generate_uid(),
+        LogLevel::Off,
+        &exec_argv(&["true".to_string()]),
+        Arc::clone(&out),
+        Arc::clone(&err),
+        opts,
+    )
+    .expect("run_argv failed");
+    assert_eq!(code, 0);
+    // Not captured — passthrough went to the inherited fd, not the buffer.
+    assert!(out.read().is_empty());
+
+    // Exit code from an argv exec.
+    let code = run_argv(
+        generate_uid(),
+        LogLevel::Off,
+        &exec_argv(&["sh".to_string(), "-c".to_string(), "exit 9".to_string()]),
+        Arc::new(LogBuffer::new()),
+        Arc::new(LogBuffer::new()),
+        opts,
+    )
+    .expect("run_argv failed");
+    assert_eq!(code, 9);
+}
+
+#[test]
+fn pty_session_runs_interactive_shell() {
+    use cvisor_core::{spawn_session, PtyMode};
+    use std::time::Duration;
+    // A buffered PTY session: write shell input to the master, read the merged
+    // terminal output back. Proves the session lifecycle + PTY plumbing.
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let session = spawn_session(
+        generate_uid(),
+        LogLevel::Off,
+        &["/bin/sh".to_string(), "-i".to_string()],
+        ExecOpts::default(),
+        PtyMode::Buffered,
+    )
+    .expect("spawn_session failed");
+
+    session.write_stdin(b"echo SESSION_OK\n").unwrap();
+    session.write_stdin(b"exit 3\n").unwrap();
+
+    // Collect output until the shell exits (bounded).
+    let mut out = Vec::new();
+    for _ in 0..100 {
+        out.extend(session.read_stdout());
+        if session.try_wait().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let code = session.wait();
+    out.extend(session.read_stdout());
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.contains("SESSION_OK"), "pty output: {text:?}");
+    assert_eq!(code, 3);
 }

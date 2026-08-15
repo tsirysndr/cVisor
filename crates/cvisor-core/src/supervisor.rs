@@ -98,6 +98,10 @@ pub struct Supervisor {
     start: std::time::Instant,
     /// When false, INET/INET6 sockets and outbound connects are denied.
     allow_network: bool,
+    /// When false, writes to an untracked fd 1/2 are continued to the real
+    /// (inherited) fd instead of captured into the log buffers — used for the
+    /// CLI and PTY sessions, where stdio flows straight to a terminal.
+    capture_stdio: bool,
     /// The init guest's exit_group status, captured from the syscall so the exit
     /// code survives even when the host process reaps the guest before us (e.g.
     /// the BEAM's SIGCHLD handler). `NO_EXIT` until the init process exits.
@@ -120,6 +124,7 @@ impl Supervisor {
         stderr: Arc<LogBuffer>,
         overlay: OverlayRoot,
         allow_network: bool,
+        capture_stdio: bool,
     ) -> Supervisor {
         Supervisor {
             notify_fd,
@@ -131,6 +136,7 @@ impl Supervisor {
             stderr,
             start: std::time::Instant::now(),
             allow_network,
+            capture_stdio,
             exit_status: AtomicI32::new(NO_EXIT),
             state: Mutex::new(VirtState {
                 overlay,
@@ -557,14 +563,16 @@ impl Supervisor {
                 let written = file.write(buf)?;
                 Ok(notif::reply_success(notif.id, written as i64))
             }
-            None if fd == 1 => {
+            None if fd == 1 && self.capture_stdio => {
                 self.stdout.write(buf);
                 Ok(notif::reply_success(notif.id, n as i64))
             }
-            None if fd == 2 => {
+            None if fd == 2 && self.capture_stdio => {
                 self.stderr.write(buf);
                 Ok(notif::reply_success(notif.id, n as i64))
             }
+            // Passthrough mode (CLI/PTY) or any other fd: run the real write on
+            // the guest's inherited fd (terminal, PTY slave, pipe, …).
             None => Ok(notif::reply_continue(notif.id)),
         }
     }
@@ -2420,6 +2428,7 @@ mod tests {
             Arc::new(LogBuffer::new()),
             Arc::new(LogBuffer::new()),
             overlay,
+            true,
             true,
         ))
     }

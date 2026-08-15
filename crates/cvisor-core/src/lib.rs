@@ -25,7 +25,10 @@ pub mod setup;
 pub mod supervisor;
 
 #[cfg(target_os = "linux")]
-pub use setup::{cleanup_overlay, execute, execute_with, ExecOpts};
+pub use setup::{
+    cleanup_overlay, exec_argv, execute, execute_with, run_argv, shell_argv, spawn_session,
+    ExecOpts, PtyMode, Session,
+};
 
 pub use error::{Errno, SysError, SysResult};
 pub use log_buffer::LogBuffer;

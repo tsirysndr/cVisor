@@ -111,6 +111,7 @@ mod imp {
         let opts = ExecOpts {
             allow_network: sb.allow_network,
             timeout: (timeout_ms > 0).then(|| Duration::from_millis(timeout_ms)),
+            ..ExecOpts::default()
         };
         let stdout = Arc::new(LogBuffer::new());
         let stderr = Arc::new(LogBuffer::new());

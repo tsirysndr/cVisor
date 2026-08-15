@@ -95,6 +95,7 @@ mod imp {
             timeout: timeout_ms
                 .filter(|ms| *ms > 0)
                 .map(|ms| Duration::from_millis(ms as u64)),
+            ..ExecOpts::default()
         };
         // Blocks until the guest command exits (forks inside the Node process;
         // the supervisor loop runs on this thread). Behavior preserved from Zig.
