@@ -15,13 +15,13 @@ commands directly inside your application.
 Add the package to your `rebar.config`:
 
 ```erlang
-{deps, [{cvisor, "0.2.0"}]}.
+{deps, [{cvisor, "0.3.0"}]}.
 ```
 
 Or, from Elixir, to your `mix.exs`:
 
 ```elixir
-{:cvisor, "~> 0.2.0"}
+{:cvisor, "~> 0.3.0"}
 ```
 
 The prebuilt `libcvisor` (aarch64 and x86_64, musl) ships in the package; the

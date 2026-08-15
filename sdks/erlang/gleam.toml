@@ -3,7 +3,7 @@
 # (priv/cvisor_nif.so) is built by the Makefile / rebar3 pre-hook, not by Gleam,
 # so build it before compiling a Gleam consumer (`make -C sdks/erlang`).
 name = "cvisor"
-version = "0.2.0"
+version = "0.3.0"
 target = "erlang"
 
 [dependencies]
