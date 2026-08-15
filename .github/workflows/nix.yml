@@ -23,6 +23,14 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@main
 
+      # Pulls prebuilt store paths from (and pushes new ones to) the `cvisor`
+      # Cachix cache, so rustc deps and the crane deps-only artifact are reused
+      # across runs. On PRs from forks the token is empty -> pull-only.
+      - uses: cachix/cachix-action@v15
+        with:
+          name: cvisor
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
       # Builds the cvisor CLI (all features) via the crane flake for this
       # system's Linux arch.
       - name: nix build .#cvisor
