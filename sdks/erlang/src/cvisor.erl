@@ -1,29 +1,48 @@
 %% cVisor Erlang SDK — a NIF-backed wrapper over the libcvisor C ABI.
 %%
-%%   {ok, Stdout, Stderr} = cvisor:run(<<"echo hello">>).
-%%   %% Stdout = <<"hello\n">>
+%%   {ok, Stdout, Stderr, ExitCode} = cvisor:run(<<"echo hello">>).
+%%   %% Stdout = <<"hello\n">>, ExitCode = 0
 %%
 %% Linux-only. The NIF dlopen's libcvisor.so; set CVISOR_LIB to override the
 %% path, otherwise it is loaded from the application's priv directory.
 -module(cvisor).
 
--export([run/1]).
+-export([run/1, run/2, set_allow_network/1]).
 -on_load(init/0).
 
 -define(APPNAME, cvisor).
 -define(LIBNAME, "cvisor_nif").
 
 %% @doc Run a shell command in the sandbox, blocking until it exits.
-%% Returns the captured stdout and stderr as binaries.
+%% Returns the captured stdout and stderr as binaries, and the guest's
+%% exit code (shell convention: status, or 128+signo when killed).
 -spec run(binary() | string()) ->
-    {ok, binary(), binary()} | {error, atom()}.
-run(Command) when is_list(Command) ->
-    run(list_to_binary(Command));
-run(Command) when is_binary(Command) ->
-    run_nif(Command).
+    {ok, binary(), binary(), integer()} | {error, atom()}.
+run(Command) ->
+    run(Command, 0).
 
-%% NIF stub — replaced on load.
-run_nif(_Command) ->
+%% @doc Like {@link run/1}, but SIGKILLs the guest after `TimeoutMs'
+%% milliseconds (0 = no limit). A timed-out run reports exit code 137.
+-spec run(binary() | string(), non_neg_integer()) ->
+    {ok, binary(), binary(), integer()} | {error, atom()}.
+run(Command, TimeoutMs) when is_list(Command) ->
+    run(list_to_binary(Command), TimeoutMs);
+run(Command, TimeoutMs) when is_binary(Command), is_integer(TimeoutMs), TimeoutMs >= 0 ->
+    run_nif(Command, TimeoutMs).
+
+%% @doc Allow or deny outbound INET/INET6 networking for sandboxes
+%% created by subsequent runs. The default is to allow.
+-spec set_allow_network(boolean()) -> ok.
+set_allow_network(true) ->
+    set_allow_network_nif(1);
+set_allow_network(false) ->
+    set_allow_network_nif(0).
+
+%% NIF stubs — replaced on load.
+run_nif(_Command, _TimeoutMs) ->
+    erlang:nif_error(nif_not_loaded).
+
+set_allow_network_nif(_Allow) ->
     erlang:nif_error(nif_not_loaded).
 
 init() ->

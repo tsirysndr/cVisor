@@ -27,8 +27,11 @@ module Cvisor
     extern "void* cvisor_sandbox_new(void)"
     extern "void cvisor_sandbox_free(void*)"
     extern "void cvisor_sandbox_set_log_level(void*, int)"
+    extern "void cvisor_sandbox_set_allow_network(void*, int)"
     extern "void* cvisor_run(void*, const char*)"
+    extern "void* cvisor_run_timeout(void*, const char*, unsigned long long)"
     extern "void cvisor_output_free(void*)"
+    extern "int cvisor_output_exit_code(void*)"
     extern "void* cvisor_output_stdout(void*, void*)"
     extern "void* cvisor_output_stderr(void*, void*)"
     extern "void cvisor_bytes_free(void*, size_t)"
@@ -36,11 +39,12 @@ module Cvisor
 
   # Captured output of one run.
   class Output
-    attr_reader :stdout_bytes, :stderr_bytes
+    attr_reader :stdout_bytes, :stderr_bytes, :exit_code
 
-    def initialize(stdout_bytes, stderr_bytes)
+    def initialize(stdout_bytes, stderr_bytes, exit_code)
       @stdout_bytes = stdout_bytes
       @stderr_bytes = stderr_bytes
+      @exit_code = exit_code
     end
 
     def stdout = @stdout_bytes.force_encoding("UTF-8")
@@ -57,12 +61,21 @@ module Cvisor
       Native.cvisor_sandbox_set_log_level(@ptr, level == "DEBUG" ? 1 : 0)
     end
 
-    def run(command)
-      out = Native.cvisor_run(@ptr, command)
+    def set_allow_network(allow)
+      Native.cvisor_sandbox_set_allow_network(@ptr, allow ? 1 : 0)
+    end
+
+    def run(command, timeout_ms: nil)
+      out = if timeout_ms.is_a?(Integer) && timeout_ms.positive?
+              Native.cvisor_run_timeout(@ptr, command, timeout_ms)
+            else
+              Native.cvisor_run(@ptr, command)
+            end
       raise "sandbox run failed" if out.null?
       begin
         Output.new(read_output(out, :cvisor_output_stdout),
-                   read_output(out, :cvisor_output_stderr))
+                   read_output(out, :cvisor_output_stderr),
+                   Native.cvisor_output_exit_code(out))
       ensure
         Native.cvisor_output_free(out)
       end

@@ -43,7 +43,28 @@ with Sandbox() as sb:
 ```
 
 `Sandbox.run(cmd)` blocks until the sandboxed command exits and returns an
-`Output` with `.stdout` / `.stderr` (str) and `.stdout_bytes` / `.stderr_bytes`.
+`Output` with `.stdout` / `.stderr` (str), `.stdout_bytes` / `.stderr_bytes`,
+and `.exit_code` (int, shell convention: the command's status, or 128+signo if
+it was killed by a signal).
+
+### Timeouts
+
+`Sandbox.run(cmd, timeout_ms=...)` SIGKILLs the guest after `timeout_ms`
+milliseconds; a timed-out run reports exit code 137:
+
+```python
+out = sb.run("sleep 30", timeout_ms=300)
+assert out.exit_code == 137
+```
+
+### Network policy
+
+`Sandbox.set_allow_network(allow)` controls outbound INET/INET6 networking
+(allowed by default):
+
+```python
+sb.set_allow_network(False)  # deny outbound networking
+```
 
 ## Interactive console
 

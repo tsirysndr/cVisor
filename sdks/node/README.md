@@ -44,7 +44,21 @@ interface Output {
   stderr: () => Promise<string>;
   stdoutStream: ReadableStream<Uint8Array>;
   stderrStream: ReadableStream<Uint8Array>;
+  exitCode: number; // shell convention: status, or 128 + signal
 }
+```
+
+### Exit codes, timeouts, and network policy
+
+```ts
+const { exitCode } = sb.runCmd("exit 3");        // 3
+sb.runCmd("false").exitCode;                       // 1
+
+// SIGKILL the guest after a deadline; a timed-out run reports 137 (128 + 9):
+sb.runCmd("sleep 60", { timeoutMs: 500 }).exitCode; // 137
+
+// Egress kill switch — deny outbound INET/INET6 sockets (default allowed):
+sb.setAllowNetwork(false);
 ```
 
 Filesystem operations are virtualized (a copy-on-write overlay), and unsafe

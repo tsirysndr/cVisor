@@ -6,19 +6,25 @@ if (platform() !== "linux") {
   throw new Error("cVisor only supports Linux");
 }
 
-/** FFI contract: typed interface for the native Zig module loaded via require(). */
+/** FFI contract: typed interface for the native module loaded via require(). */
 export interface NativeModule {
   createSandbox(): External<"Sandbox">;
   sandboxSetLogLevel(
     sandbox: External<"Sandbox">,
     level: "OFF" | "DEBUG",
   ): void;
+  sandboxSetAllowNetwork(
+    sandbox: External<"Sandbox">,
+    allow: boolean,
+  ): void;
   sandboxRunCmd(
     sandbox: External<"Sandbox">,
     command: string,
+    timeoutMs?: number,
   ): {
     stdout: External<"Stream">;
     stderr: External<"Stream">;
+    exitCode: number;
   };
   streamNext(stream: External<"Stream">): Uint8Array | null;
 }

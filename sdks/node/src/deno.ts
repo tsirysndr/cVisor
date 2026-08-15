@@ -3,9 +3,9 @@
 // Needs --allow-ffi (plus --allow-env for the CVISOR_LIB override).
 
 import { libraryPath } from "./libpath";
-import { buildCommand, bytesToStream, createOutput, Output } from "./output";
+import { buildCommand, bytesToStream, createOutput, Output, RunOptions } from "./output";
 
-export type { Output } from "./output";
+export type { Output, RunOptions } from "./output";
 
 // This package compiles without Deno's type definitions; the entry only ever
 // executes under Deno, where the global is present.
@@ -18,8 +18,17 @@ const lib = Deno.dlopen(libraryPath(), {
     parameters: ["pointer", "i32"],
     result: "void",
   },
+  cvisor_sandbox_set_allow_network: {
+    parameters: ["pointer", "i32"],
+    result: "void",
+  },
   cvisor_run: { parameters: ["pointer", "buffer"], result: "pointer" },
+  cvisor_run_timeout: {
+    parameters: ["pointer", "buffer", "u64"],
+    result: "pointer",
+  },
   cvisor_output_free: { parameters: ["pointer"], result: "void" },
+  cvisor_output_exit_code: { parameters: ["pointer"], result: "i32" },
   cvisor_output_stdout: { parameters: ["pointer", "buffer"], result: "pointer" },
   cvisor_output_stderr: { parameters: ["pointer", "buffer"], result: "pointer" },
   cvisor_bytes_free: { parameters: ["pointer", "usize"], result: "void" },
@@ -52,16 +61,25 @@ export class Sandbox {
     lib.symbols.cvisor_sandbox_set_log_level(this.#ptr, level === "DEBUG" ? 1 : 0);
   }
 
+  /** Enable or disable outbound INET/INET6 networking (default on). */
+  setAllowNetwork(allow: boolean): void {
+    lib.symbols.cvisor_sandbox_set_allow_network(this.#ptr, allow ? 1 : 0);
+  }
+
   /** Run a command to completion; the returned Output's streams replay the
    * captured bytes so the shape matches the napi entry. */
-  runCmd(command: string): Output {
+  runCmd(command: string, options: RunOptions = {}): Output {
     const cmd = new TextEncoder().encode(command + "\0");
-    const out = lib.symbols.cvisor_run(this.#ptr, cmd);
+    const timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 0;
+    const out = timeoutMs
+      ? lib.symbols.cvisor_run_timeout(this.#ptr, cmd, BigInt(timeoutMs))
+      : lib.symbols.cvisor_run(this.#ptr, cmd);
     if (out === null) throw new Error("sandbox run failed");
     try {
       const stdoutBytes = readOutput(out, lib.symbols.cvisor_output_stdout);
       const stderrBytes = readOutput(out, lib.symbols.cvisor_output_stderr);
-      return createOutput(bytesToStream(stdoutBytes), bytesToStream(stderrBytes));
+      const exitCode = lib.symbols.cvisor_output_exit_code(out);
+      return createOutput(bytesToStream(stdoutBytes), bytesToStream(stderrBytes), exitCode);
     } finally {
       lib.symbols.cvisor_output_free(out);
     }

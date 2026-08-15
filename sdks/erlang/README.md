@@ -31,29 +31,43 @@ PATH.
 ## Usage
 
 ```erlang
-1> {ok, Stdout, Stderr} = cvisor:run(<<"echo hello">>).
-{ok,<<"hello\n">>,<<>>}
+1> {ok, Stdout, Stderr, ExitCode} = cvisor:run(<<"echo hello">>).
+{ok,<<"hello\n">>,<<>>,0}
 
 2> cvisor:run("printf 'a\nb\nc\n' | grep b").
-{ok,<<"b\n">>,<<>>}
+{ok,<<"b\n">>,<<>>,0}
 
 3> %% Writes land in the sandbox's own filesystem view, not the host.
 3> cvisor:run(<<"echo secret > /tmp/f && cat /tmp/f">>).
-{ok,<<"secret\n">>,<<>>}
+{ok,<<"secret\n">>,<<>>,0}
 
 4> cvisor:run(<<"uname -n">>).
-{ok,<<"cvisor\n">>,<<>>}
+{ok,<<"cvisor\n">>,<<>>,0}
+
+5> %% run/2 SIGKILLs the guest after a timeout (ms); a timed-out run
+5> %% reports exit code 137.
+5> cvisor:run(<<"sleep 30">>, 300).
+{ok,<<>>,<<>>,137}
+
+6> %% Deny outbound INET/INET6 networking for subsequent runs
+6> %% (allowed by default).
+6> cvisor:set_allow_network(false).
+ok
 ```
 
 `cvisor:run/1` accepts a binary or a string, blocks until the sandboxed
 command exits (on a dirty I/O scheduler, so it does not stall the VM), and
-returns `{ok, Stdout, Stderr}` or `{error, Reason}`.
+returns `{ok, Stdout, Stderr, ExitCode}` or `{error, Reason}`. The exit code
+follows shell convention: the guest's status, or 128+signo when killed by a
+signal. `cvisor:run/2` takes a timeout in milliseconds (0 = no limit).
+`cvisor:set_allow_network/1` takes a boolean and applies to sandboxes
+created by subsequent runs.
 
 From Elixir:
 
 ```elixir
 iex> :cvisor.run("echo hello from elixir")
-{:ok, "hello from elixir\n", ""}
+{:ok, "hello from elixir\n", "", 0}
 ```
 
 ## Requirements

@@ -9,13 +9,29 @@ require "cvisor"
 
 sb = Cvisor::Sandbox.new
 out = sb.run("echo hello")
-puts out.stdout   # "hello\n"
-puts out.stderr   # ""
+puts out.stdout    # "hello\n"
+puts out.stderr    # ""
+puts out.exit_code # 0
 ```
 
-`Sandbox#run(cmd)` blocks until the sandboxed command exits and returns an
-`Output` with `#stdout` / `#stderr` (String) and `#stdout_bytes` /
-`#stderr_bytes`.
+`Sandbox#run(cmd, timeout_ms: nil)` blocks until the sandboxed command exits and
+returns an `Output` with `#stdout` / `#stderr` (String), `#stdout_bytes` /
+`#stderr_bytes`, and `#exit_code` (Integer, shell convention: status, or
+128+signo when killed by a signal).
+
+Pass a positive `timeout_ms:` to SIGKILL the guest after that many
+milliseconds; a timed-out run reports exit code 137:
+
+```ruby
+sb.run("sleep 30", timeout_ms: 300).exit_code  # 137
+```
+
+`Sandbox#set_allow_network(allow)` toggles outbound INET/INET6 networking for
+the sandbox (allowed by default):
+
+```ruby
+sb.set_allow_network(false)  # deny outbound networking
+```
 
 ## Interactive console
 

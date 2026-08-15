@@ -6,9 +6,13 @@
 -export([run/0]).
 
 run() ->
-    {ok, <<"hello from erlang\n">>, _} = cvisor:run(<<"echo hello from erlang">>),
-    {ok, <<"b\n">>, _} = cvisor:run(<<"printf 'a\nb\nc\n' | grep b">>),
-    {ok, <<"x\n">>, _} = cvisor:run(<<"echo x > /tmp/f && grep x /tmp/f">>),
-    {ok, <<"cvisor\n">>, _} = cvisor:run(<<"uname -n">>),
-    {ok, <<"Name:\tcvisor-guest\n">>, _} = cvisor:run(<<"grep Name /proc/self/status">>),
+    {ok, <<"hello from erlang\n">>, _, 0} = cvisor:run(<<"echo hello from erlang">>),
+    {ok, <<"b\n">>, _, 0} = cvisor:run(<<"printf 'a\nb\nc\n' | grep b">>),
+    {ok, <<"x\n">>, _, 0} = cvisor:run(<<"echo x > /tmp/f && grep x /tmp/f">>),
+    {ok, <<"cvisor\n">>, _, 0} = cvisor:run(<<"uname -n">>),
+    {ok, <<"Name:\tcvisor-guest\n">>, _, 0} = cvisor:run(<<"grep Name /proc/self/status">>),
+    {ok, _, _, 7} = cvisor:run(<<"exit 7">>),
+    {ok, _, _, 137} = cvisor:run(<<"sleep 30">>, 300),
+    {ok, <<"hi\n">>, _, 0} =
+        cvisor:run(<<"echo hi > /tmp/a.part && mv /tmp/a.part /tmp/a && grep hi /tmp/a">>),
     io:format("ERLANG_SDK_OK~n").

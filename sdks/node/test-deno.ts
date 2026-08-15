@@ -24,4 +24,16 @@ await eq(sb.sh`echo templated`, "templated\n", "sb.sh template");
 const word = "hi";
 await eq(sh`echo ${word} there`, "hi there\n", "sh template + interpolation");
 
+function assert(cond: boolean, msg: string) {
+  if (!cond) throw new Error(msg);
+}
+assert(sb.runCmd("exit 7").exitCode === 7, "exit code 7");
+assert(sb.runCmd("false").exitCode === 1, "exit code 1");
+await eq(
+  sb.runCmd("echo hi > /tmp/a.part && mv /tmp/a.part /tmp/a && grep hi /tmp/a"),
+  "hi\n",
+  "atomic rename",
+);
+assert(sb.runCmd("sleep 30", { timeoutMs: 300 }).exitCode === 137, "timeout kills with 137");
+
 console.log("DENO_SDK_OK");

@@ -3,18 +3,28 @@ export interface Output {
   stderrStream: ReadableStream<Uint8Array>;
   stdout: () => Promise<string>;
   stderr: () => Promise<string>;
+  /** The guest's exit code (shell convention: status, or 128 + signal). */
+  exitCode: number;
 }
 
 export function createOutput(
   stdoutStream: ReadableStream<Uint8Array>,
   stderrStream: ReadableStream<Uint8Array>,
+  exitCode: number,
 ): Output {
   return {
     stdoutStream,
     stderrStream,
     stdout: () => new Response(stdoutStream).text(),
     stderr: () => new Response(stderrStream).text(),
+    exitCode,
   };
+}
+
+/** Optional per-run controls shared by every SDK entry. */
+export interface RunOptions {
+  /** SIGKILL the guest after this many milliseconds (exit code 137). */
+  timeoutMs?: number;
 }
 
 /** Wrap an already-materialized buffer as a single-chunk stream, so the FFI

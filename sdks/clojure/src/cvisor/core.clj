@@ -49,14 +49,17 @@
           ptr    ValueLayout/ADDRESS
           int32  ValueLayout/JAVA_INT
           size-t ValueLayout/JAVA_LONG]
-      {:sandbox-new   (bind "cvisor_sandbox_new" (fd ptr))
-       :sandbox-free  (bind "cvisor_sandbox_free" (fd nil ptr))
-       :set-log-level (bind "cvisor_sandbox_set_log_level" (fd nil ptr int32))
-       :run           (bind "cvisor_run" (fd ptr ptr ptr))
-       :output-free   (bind "cvisor_output_free" (fd nil ptr))
-       :output-stdout (bind "cvisor_output_stdout" (fd ptr ptr ptr))
-       :output-stderr (bind "cvisor_output_stderr" (fd ptr ptr ptr))
-       :bytes-free    (bind "cvisor_bytes_free" (fd nil ptr size-t))})))
+      {:sandbox-new       (bind "cvisor_sandbox_new" (fd ptr))
+       :sandbox-free      (bind "cvisor_sandbox_free" (fd nil ptr))
+       :set-log-level     (bind "cvisor_sandbox_set_log_level" (fd nil ptr int32))
+       :set-allow-network (bind "cvisor_sandbox_set_allow_network" (fd nil ptr int32))
+       :run               (bind "cvisor_run" (fd ptr ptr ptr))
+       :run-timeout       (bind "cvisor_run_timeout" (fd ptr ptr ptr size-t))
+       :output-free       (bind "cvisor_output_free" (fd nil ptr))
+       :output-exit-code  (bind "cvisor_output_exit_code" (fd int32 ptr))
+       :output-stdout     (bind "cvisor_output_stdout" (fd ptr ptr ptr))
+       :output-stderr     (bind "cvisor_output_stderr" (fd ptr ptr ptr))
+       :bytes-free        (bind "cvisor_bytes_free" (fd nil ptr size-t))})))
 
 (defn- call [k & args]
   (.invokeWithArguments ^MethodHandle (get @handles k) ^java.util.List (vec args)))
@@ -98,24 +101,36 @@
   [^Sandbox sb level]
   (call :set-log-level (live-ptr sb) (if (#{:debug "DEBUG"} level) (int 1) (int 0))))
 
+(defn set-allow-network!
+  "Enable or disable outbound INET/INET6 networking for the sandbox (default on).
+  When off, the guest's attempts to create internet sockets are denied."
+  [^Sandbox sb allow?]
+  (call :set-allow-network (live-ptr sb) (if allow? (int 1) (int 0))))
+
 (defn run
   "Run a shell command in the sandbox, blocking until it exits. Returns
-  {:stdout String, :stderr String, :stdout-bytes bytes, :stderr-bytes bytes}."
-  [^Sandbox sb ^String command]
-  (with-open [arena (Arena/ofConfined)]
-    (let [cmd (.allocateFrom arena command)
-          out (call :run (live-ptr sb) cmd)]
-      (when (null-seg? out)
-        (throw (ex-info "sandbox run failed" {:command command})))
-      (try
-        (let [stdout-bytes (read-output arena out :output-stdout)
-              stderr-bytes (read-output arena out :output-stderr)]
-          {:stdout       (String. ^bytes stdout-bytes StandardCharsets/UTF_8)
-           :stderr       (String. ^bytes stderr-bytes StandardCharsets/UTF_8)
-           :stdout-bytes stdout-bytes
-           :stderr-bytes stderr-bytes})
-        (finally
-          (call :output-free out))))))
+  {:stdout String, :stderr String, :exit-code long, :stdout-bytes bytes,
+  :stderr-bytes bytes}. Options:
+    :timeout-ms — SIGKILL the guest after this many milliseconds (exit code 137)."
+  ([^Sandbox sb ^String command] (run sb command {}))
+  ([^Sandbox sb ^String command {:keys [timeout-ms]}]
+   (with-open [arena (Arena/ofConfined)]
+     (let [cmd (.allocateFrom arena command)
+           out (if timeout-ms
+                 (call :run-timeout (live-ptr sb) cmd (long timeout-ms))
+                 (call :run (live-ptr sb) cmd))]
+       (when (null-seg? out)
+         (throw (ex-info "sandbox run failed" {:command command})))
+       (try
+         (let [stdout-bytes (read-output arena out :output-stdout)
+               stderr-bytes (read-output arena out :output-stderr)]
+           {:stdout       (String. ^bytes stdout-bytes StandardCharsets/UTF_8)
+            :stderr       (String. ^bytes stderr-bytes StandardCharsets/UTF_8)
+            :exit-code    (call :output-exit-code out)
+            :stdout-bytes stdout-bytes
+            :stderr-bytes stderr-bytes})
+         (finally
+           (call :output-free out)))))))
 
 (defn close
   "Free the sandbox. Idempotent."

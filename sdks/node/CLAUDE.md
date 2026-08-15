@@ -37,7 +37,8 @@ root, napi-rs), producing `libcvisor.node`. Build/run via
 ```ts
 createSandbox(): External<"Sandbox">;
 sandboxSetLogLevel(sandbox, "OFF" | "DEBUG"): void;
-sandboxRunCmd(sandbox, command): { stdout: External<"Stream">, stderr: External<"Stream"> };
+sandboxSetAllowNetwork(sandbox, allow: boolean): void;
+sandboxRunCmd(sandbox, command, timeoutMs?): { stdout: External<"Stream">, stderr: External<"Stream">, exitCode: number };
 streamNext(stream): Uint8Array | null;
 ```
 

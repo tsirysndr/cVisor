@@ -36,3 +36,28 @@ def test_pipeline():
     with Sandbox() as sb:
         out = sb.run("printf 'a\\nb\\nc\\n' | grep b")
         assert out.stdout == "b\n"
+
+
+def test_exit_codes():
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        assert sb.run("exit 7").exit_code == 7
+        assert sb.run("false").exit_code == 1
+        assert sb.run("true").exit_code == 0
+
+
+def test_atomic_rename():
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        out = sb.run("echo hi > /tmp/a.part && mv /tmp/a.part /tmp/a && grep hi /tmp/a")
+        assert out.stdout == "hi\n"
+
+
+def test_timeout():
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        out = sb.run("sleep 30", timeout_ms=300)
+        assert out.exit_code == 137

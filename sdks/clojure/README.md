@@ -20,9 +20,21 @@ Published on Clojars as `io.github.tsirysndr/cvisor`.
 ```
 
 `run` blocks until the sandboxed command exits and returns a map with
-`:stdout` / `:stderr` (String) and `:stdout-bytes` / `:stderr-bytes`.
-`sandbox` returns a `Closeable`, so `with-open` frees it; `close` is also
-exposed directly and is idempotent.
+`:stdout` / `:stderr` (String), `:exit-code` (long — shell convention: status,
+or 128 + signal), and `:stdout-bytes` / `:stderr-bytes`. `sandbox` returns a
+`Closeable`, so `with-open` frees it; `close` is also exposed directly and is
+idempotent.
+
+```clojure
+;; Exit codes:
+(:exit-code (cvisor/run sb "exit 3"))          ; => 3
+
+;; Timeout — SIGKILL the guest after N ms; a timed-out run reports 137:
+(:exit-code (cvisor/run sb "sleep 60" {:timeout-ms 500}))   ; => 137
+
+;; Egress kill switch — deny outbound INET/INET6 sockets (default allowed):
+(cvisor/set-allow-network! sb false)
+```
 
 Add `--enable-native-access=ALL-UNNAMED` to your JVM options to silence the
 FFM restricted-method warning (the `:test` and `:console` aliases already do).

@@ -1,8 +1,8 @@
 import { External } from "./napi";
 import { native } from "./native";
-import { buildCommand, createOutput, Output } from "./output";
+import { buildCommand, createOutput, Output, RunOptions } from "./output";
 
-export type { Output } from "./output";
+export type { Output, RunOptions } from "./output";
 
 class Stream {
   private ptr: External<"Stream">;
@@ -38,11 +38,17 @@ export class Sandbox {
     native.sandboxSetLogLevel(this.ptr, level);
   }
 
-  runCmd(command: string): Output {
-    const result = native.sandboxRunCmd(this.ptr, command);
+  /** Enable or disable outbound INET/INET6 networking (default on). */
+  setAllowNetwork(allow: boolean) {
+    native.sandboxSetAllowNetwork(this.ptr, allow);
+  }
+
+  runCmd(command: string, options: RunOptions = {}): Output {
+    const result = native.sandboxRunCmd(this.ptr, command, options.timeoutMs);
     return createOutput(
       new Stream(result.stdout).toReadableStream(),
       new Stream(result.stderr).toReadableStream(),
+      result.exitCode,
     );
   }
 

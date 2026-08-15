@@ -3,9 +3,9 @@
 
 import { dlopen, FFIType, ptr, toArrayBuffer, type Pointer } from "bun:ffi";
 import { libraryPath } from "./libpath";
-import { buildCommand, bytesToStream, createOutput, Output } from "./output";
+import { buildCommand, bytesToStream, createOutput, Output, RunOptions } from "./output";
 
-export type { Output } from "./output";
+export type { Output, RunOptions } from "./output";
 
 const { symbols } = dlopen(libraryPath(), {
   cvisor_sandbox_new: { args: [], returns: FFIType.ptr },
@@ -14,8 +14,17 @@ const { symbols } = dlopen(libraryPath(), {
     args: [FFIType.ptr, FFIType.i32],
     returns: FFIType.void,
   },
+  cvisor_sandbox_set_allow_network: {
+    args: [FFIType.ptr, FFIType.i32],
+    returns: FFIType.void,
+  },
   cvisor_run: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.ptr },
+  cvisor_run_timeout: {
+    args: [FFIType.ptr, FFIType.cstring, FFIType.u64],
+    returns: FFIType.ptr,
+  },
   cvisor_output_free: { args: [FFIType.ptr], returns: FFIType.void },
+  cvisor_output_exit_code: { args: [FFIType.ptr], returns: FFIType.i32 },
   cvisor_output_stdout: {
     args: [FFIType.ptr, FFIType.ptr],
     returns: FFIType.ptr,
@@ -53,16 +62,25 @@ export class Sandbox {
     symbols.cvisor_sandbox_set_log_level(this.ptr, level === "DEBUG" ? 1 : 0);
   }
 
+  /** Enable or disable outbound INET/INET6 networking (default on). */
+  setAllowNetwork(allow: boolean): void {
+    symbols.cvisor_sandbox_set_allow_network(this.ptr, allow ? 1 : 0);
+  }
+
   /** Run a command to completion; the returned Output's streams replay the
    * captured bytes so the shape matches the napi entry. */
-  runCmd(command: string): Output {
+  runCmd(command: string, options: RunOptions = {}): Output {
     const cmd = Buffer.from(command + "\0", "utf8");
-    const out = symbols.cvisor_run(this.ptr, ptr(cmd));
+    const timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 0;
+    const out = timeoutMs
+      ? symbols.cvisor_run_timeout(this.ptr, ptr(cmd), BigInt(timeoutMs))
+      : symbols.cvisor_run(this.ptr, ptr(cmd));
     if (!out) throw new Error("sandbox run failed");
     try {
       const stdoutBytes = readOutput(out, symbols.cvisor_output_stdout);
       const stderrBytes = readOutput(out, symbols.cvisor_output_stderr);
-      return createOutput(bytesToStream(stdoutBytes), bytesToStream(stderrBytes));
+      const exitCode = symbols.cvisor_output_exit_code(out);
+      return createOutput(bytesToStream(stdoutBytes), bytesToStream(stderrBytes), exitCode);
     } finally {
       symbols.cvisor_output_free(out);
     }

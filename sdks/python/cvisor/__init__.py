@@ -11,7 +11,7 @@ from __future__ import annotations
 import ctypes
 import os
 import platform
-from ctypes import c_char_p, c_int, c_size_t, c_uint8, c_void_p, POINTER
+from ctypes import c_char_p, c_int, c_size_t, c_uint8, c_uint64, c_void_p, POINTER
 
 __all__ = ["Sandbox", "Output", "load_library"]
 
@@ -47,11 +47,20 @@ def load_library(path: str | None = None) -> ctypes.CDLL:
     lib.cvisor_sandbox_set_log_level.restype = None
     lib.cvisor_sandbox_set_log_level.argtypes = [c_void_p, c_int]
 
+    lib.cvisor_sandbox_set_allow_network.restype = None
+    lib.cvisor_sandbox_set_allow_network.argtypes = [c_void_p, c_int]
+
     lib.cvisor_run.restype = c_void_p
     lib.cvisor_run.argtypes = [c_void_p, c_char_p]
 
+    lib.cvisor_run_timeout.restype = c_void_p
+    lib.cvisor_run_timeout.argtypes = [c_void_p, c_char_p, c_uint64]
+
     lib.cvisor_output_free.restype = None
     lib.cvisor_output_free.argtypes = [c_void_p]
+
+    lib.cvisor_output_exit_code.restype = c_int
+    lib.cvisor_output_exit_code.argtypes = [c_void_p]
 
     for fn in ("cvisor_output_stdout", "cvisor_output_stderr"):
         f = getattr(lib, fn)
@@ -77,9 +86,10 @@ def _lib() -> ctypes.CDLL:
 class Output:
     """Captured output of one sandbox run."""
 
-    def __init__(self, stdout: bytes, stderr: bytes) -> None:
+    def __init__(self, stdout: bytes, stderr: bytes, exit_code: int) -> None:
         self.stdout_bytes = stdout
         self.stderr_bytes = stderr
+        self.exit_code = exit_code
 
     @property
     def stdout(self) -> str:
@@ -100,13 +110,24 @@ class Sandbox:
     def set_log_level(self, level: str) -> None:
         self._lib.cvisor_sandbox_set_log_level(self._ptr, 1 if level == "DEBUG" else 0)
 
-    def run(self, command: str) -> Output:
-        out = self._lib.cvisor_run(self._ptr, command.encode("utf-8"))
+    def set_allow_network(self, allow: bool) -> None:
+        """Allow (default) or deny outbound INET/INET6 networking."""
+        self._lib.cvisor_sandbox_set_allow_network(self._ptr, 1 if allow else 0)
+
+    def run(self, command: str, timeout_ms: int | None = None) -> Output:
+        """Run a shell command; if timeout_ms is set, SIGKILL the guest after
+        that many milliseconds (a timed-out run reports exit code 137)."""
+        cmd = command.encode("utf-8")
+        if timeout_ms is not None and timeout_ms > 0:
+            out = self._lib.cvisor_run_timeout(self._ptr, cmd, timeout_ms)
+        else:
+            out = self._lib.cvisor_run(self._ptr, cmd)
         if not out:
             raise RuntimeError("sandbox run failed")
         try:
             return Output(self._read(out, self._lib.cvisor_output_stdout),
-                          self._read(out, self._lib.cvisor_output_stderr))
+                          self._read(out, self._lib.cvisor_output_stderr),
+                          self._lib.cvisor_output_exit_code(out))
         finally:
             self._lib.cvisor_output_free(out)
 
