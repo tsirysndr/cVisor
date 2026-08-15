@@ -10,7 +10,13 @@ cVisor ships one **native runtime** and several thin language SDKs that wrap it.
 | Python  | `ctypes` FFI over `libcvisor.so` (uv project)      | `python/`            |
 | Ruby    | `fiddle` FFI over `libcvisor.so`                   | `ruby/lib/cvisor.rb` |
 | Erlang  | NIF bridging to `libcvisor.so`                     | `erlang/`            |
+| Elixir  | pipe-friendly builder over the Erlang `cvisor` NIF | `elixir/`            |
+| Gleam   | pipe-friendly builder over the Erlang `cvisor` NIF | `gleam/`             |
 | Clojure | Java FFM (`java.lang.foreign`) over `libcvisor.so` | `clojure/`           |
+
+The Elixir (`cvisor_ex`) and Gleam (`gleam_cvisor`) SDKs both run on the BEAM
+and reuse the Erlang SDK's NIF runtime (a path dependency on `erlang/`), adding
+an idiomatic immutable builder you compose with the pipe operator `|>`.
 
 Node, Bun, and Deno all install the same `cvisor` npm package: its `exports`
 map picks the napi entry under Node and the FFI entries under Bun (`"bun"`
@@ -117,6 +123,15 @@ puts Cvisor::Sandbox.new.run("echo hi").stdout
 ```erlang
 %% Erlang
 {ok, Out, _Err, 0} = cvisor:run(<<"echo hi">>).
+```
+```elixir
+# Elixir (cvisor_ex on Hex) — pipe-friendly builder
+Cvisor.new() |> Cvisor.memory_limit(256 * 1024 * 1024) |> Cvisor.run("echo hi")
+```
+```gleam
+// Gleam (gleam_cvisor on Hex) — pipe-friendly builder
+import gleam_cvisor as cvisor
+cvisor.new() |> cvisor.pids_limit(128) |> cvisor.run("echo hi")
 ```
 ```clojure
 ;; Clojure (io.github.tsirysndr/cvisor on Clojars, JDK 22+)

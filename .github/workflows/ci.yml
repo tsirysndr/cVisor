@@ -158,6 +158,35 @@ jobs:
               bash linux-install.sh >/dev/null 2>&1 &&
               clojure -M:test'
 
+      # Elixir wraps the Erlang `cvisor` NIF as a path dep (../erlang), so mount
+      # all of sdks/ and point CVISOR_LIB at the erlang priv .so. Mix compiles
+      # the rebar3 dep (building the NIF via its Makefile pre-hook) then runs the
+      # ExUnit suite.
+      - name: Elixir SDK (cvisor_ex)
+        run: |
+          docker run --rm \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            -e CVISOR_LIB=/sdks/erlang/priv/libcvisor-${{ matrix.arch }}.so \
+            -v "$PWD/sdks:/sdks" -w /sdks/elixir \
+            elixir:otp-27-alpine sh -c '
+              apk add --no-cache build-base >/dev/null 2>&1 &&
+              mix local.rebar --force >/dev/null && mix local.hex --force >/dev/null &&
+              mix deps.get >/dev/null && mix test'
+
+      # Gleam consumes the same Erlang runtime as a path dep (../erlang has a
+      # gleam.toml); Gleam does not build the C NIF, so `make` it first, then
+      # `gleam test`.
+      - name: Gleam SDK (gleam_cvisor)
+        run: |
+          docker run --rm \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            -e CVISOR_LIB=/sdks/erlang/priv/libcvisor-${{ matrix.arch }}.so \
+            -v "$PWD/sdks:/sdks" -w /sdks/gleam \
+            ghcr.io/gleam-lang/gleam:v1.15.0-erlang-alpine sh -c '
+              apk add --no-cache build-base >/dev/null 2>&1 &&
+              make -C /sdks/erlang priv/cvisor_nif.so >/dev/null 2>&1 &&
+              gleam test'
+
       # Node uses the napi module (libcvisor.node) in the Debian bun image;
       # cargo xtask run-node builds it and runs test.ts (which asserts + prints
       # NODE_SDK_OK).

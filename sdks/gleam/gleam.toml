@@ -1,0 +1,19 @@
+name = "gleam_cvisor"
+version = "1.0.0"
+target = "erlang"
+
+description = "Gleam SDK for cVisor, an in-process Linux sandbox — a pipe-friendly builder over the NIF-backed cvisor runtime."
+licences = ["MIT"]
+repository = { type = "github", user = "tsirysndr", repo = "cVisor" }
+links = [{ title = "Website", href = "https://github.com/tsirysndr/cVisor" }]
+
+# Only the Erlang target is supported: the sandbox is a NIF over libcvisor.so.
+gleam = ">= 1.0.0"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+# The NIF-backed runtime. Published on Hex as `cvisor`; a path dep in the monorepo.
+cvisor = { path = "../erlang" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
