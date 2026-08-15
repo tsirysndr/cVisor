@@ -150,3 +150,59 @@ jobs:
       # NODE_SDK_OK).
       - name: Node SDK (napi)
         run: cargo xtask run-node
+
+  cache-s3:
+    name: cache e2e over S3 (minio)
+    runs-on: ubuntu-latest
+    services:
+      minio:
+        image: bitnami/minio:latest
+        ports: ["9000:9000"]
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: cvisor-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cache-s3
+
+      - name: Install musl C toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      # Build the CLI with the s3 (and zstd) features — the C deps compile with
+      # the native musl toolchain.
+      - name: Build cvisor (--features zstd,s3)
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build -p cvisor-core --bin cvisor --target x86_64-unknown-linux-musl --release --features zstd,s3
+
+      # The sandbox needs seccomp=unconfined, so run the binary inside an Alpine
+      # container on the host network (to reach the minio service at :9000).
+      - name: Cache save/restore/ls/rm over S3
+        run: |
+          CV=target/x86_64-unknown-linux-musl/release/cvisor
+          docker run --rm --network host \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            -e AWS_ACCESS_KEY_ID=minioadmin -e AWS_SECRET_ACCESS_KEY=minioadmin \
+            -v "$PWD/$CV:/bin/cvisor" --entrypoint sh alpine -c '
+              set -e
+              BK="s3://cvisor-cache/builds?endpoint=http://localhost:9000&region=us-east-1"
+              cvisor --sandbox s -- sh -c "mkdir -p /work && echo s3-content > /work/a.txt"
+              cvisor --sandbox s  --cache-backend "$BK" cache save deps-v1 sb:/work
+              cvisor --cache-backend "$BK" cache ls | grep deps-v1
+              # exact restore into a fresh sandbox
+              cvisor --sandbox s2 --cache-backend "$BK" cache restore deps-v1 sb:/work
+              cvisor --sandbox s2 -- grep s3-content /work/a.txt
+              # prefix (restore-key) hit
+              cvisor --sandbox s3 --cache-backend "$BK" cache restore deps sb:/work
+              cvisor --sandbox s3 -- grep s3-content /work/a.txt
+              cvisor --cache-backend "$BK" cache rm --all
+              echo S3_CACHE_OK'

@@ -117,7 +117,11 @@ pub fn save(
                 std::fs::create_dir_all(parent).map_err(io_err)?;
             }
             let file = std::fs::File::create(&dest).map_err(io_err)?;
-            archive::pack(&src, format, file)
+            // On pack failure (e.g. an unsupported format), don't leave a
+            // truncated archive behind.
+            archive::pack(&src, format, file).inspect_err(|_| {
+                let _ = std::fs::remove_file(&dest);
+            })
         }
         Backend::S3 { .. } => {
             let mut buf = Vec::new();
@@ -191,6 +195,79 @@ pub fn exists(key: &str, backend: &Backend, format: Format) -> SysResult<bool> {
     Ok(resolve(key, backend, format)?.is_some())
 }
 
+/// Is `name` a cache archive (one of the known archive extensions)?
+fn is_archive(name: &str) -> bool {
+    name.ends_with(".tar.gz") || name.ends_with(".tar.zst") || name.ends_with(".tar")
+}
+
+/// A cached archive: its object name (e.g. `deps-v1.tar.gz`) and byte size.
+pub struct Entry {
+    pub name: String,
+    pub size: u64,
+}
+
+/// List the cached archives in `backend`.
+pub fn list(backend: &Backend) -> SysResult<Vec<Entry>> {
+    match backend {
+        Backend::Disk { root } => {
+            let mut out = Vec::new();
+            let Ok(entries) = std::fs::read_dir(root) else {
+                return Ok(out); // no cache dir yet -> empty
+            };
+            for e in entries.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if is_archive(&name) {
+                    let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+                    out.push(Entry { name, size });
+                }
+            }
+            out.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(out)
+        }
+        Backend::S3 { .. } => s3_list(backend),
+    }
+}
+
+/// Remove the archive `key.<format ext>`. Returns true if it existed.
+pub fn remove(key: &str, backend: &Backend, format: Format) -> SysResult<bool> {
+    let name = object_name(key, format)?;
+    match backend {
+        Backend::Disk { root } => {
+            let p = root.join(&name);
+            if p.exists() {
+                std::fs::remove_file(&p).map_err(io_err)?;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        Backend::S3 { .. } => s3_delete(backend, &name).map(|_| true),
+    }
+}
+
+/// Remove every cached archive. Returns how many were removed.
+pub fn clear(backend: &Backend) -> SysResult<usize> {
+    let entries = list(backend)?;
+    let mut n = 0;
+    match backend {
+        Backend::Disk { root } => {
+            for e in entries {
+                if std::fs::remove_file(root.join(&e.name)).is_ok() {
+                    n += 1;
+                }
+            }
+        }
+        Backend::S3 { .. } => {
+            for e in entries {
+                if s3_delete(backend, &e.name).is_ok() {
+                    n += 1;
+                }
+            }
+        }
+    }
+    Ok(n)
+}
+
 #[cfg(feature = "s3")]
 fn s3_bucket(backend: &Backend) -> SysResult<(s3::Bucket, String)> {
     let Backend::S3 {
@@ -251,11 +328,9 @@ fn s3_resolve(
     ext: &str,
 ) -> SysResult<Option<String>> {
     let (bucket, key_prefix) = s3_bucket(backend)?;
-    // Exact hit first.
-    if bucket
-        .head_object_blocking(format!("{key_prefix}{exact}"))
-        .is_ok()
-    {
+    // Exact hit first. head_object returns Ok even on 404 (with the status
+    // code), so only a 200 counts as present.
+    if let Ok((_, 200)) = bucket.head_object_blocking(format!("{key_prefix}{exact}")) {
         return Ok(Some(exact.to_string()));
     }
     // Else newest object whose key starts with the prefix and ends with .ext.
@@ -282,6 +357,51 @@ fn s3_resolve(
         }
     }
     Ok(best.map(|(_, n)| n))
+}
+
+#[cfg(feature = "s3")]
+fn s3_list(backend: &Backend) -> SysResult<Vec<Entry>> {
+    let (bucket, key_prefix) = s3_bucket(backend)?;
+    let pages = bucket
+        .list_blocking(key_prefix.clone(), None)
+        .map_err(|_| SysError(Errno::IO))?;
+    let mut out = Vec::new();
+    for page in pages {
+        for obj in page.contents {
+            let name = obj
+                .key
+                .strip_prefix(&key_prefix)
+                .unwrap_or(&obj.key)
+                .to_string();
+            if is_archive(&name) {
+                out.push(Entry {
+                    name,
+                    size: obj.size,
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+#[cfg(feature = "s3")]
+fn s3_delete(backend: &Backend, name: &str) -> SysResult<()> {
+    let (bucket, prefix) = s3_bucket(backend)?;
+    bucket
+        .delete_object_blocking(format!("{prefix}{name}"))
+        .map_err(|_| SysError(Errno::IO))?;
+    Ok(())
+}
+
+#[cfg(not(feature = "s3"))]
+fn s3_list(_backend: &Backend) -> SysResult<Vec<Entry>> {
+    Err(SysError(Errno::NOSYS))
+}
+
+#[cfg(not(feature = "s3"))]
+fn s3_delete(_backend: &Backend, _name: &str) -> SysResult<()> {
+    Err(SysError(Errno::NOSYS))
 }
 
 #[cfg(not(feature = "s3"))]

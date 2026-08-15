@@ -37,6 +37,8 @@ USAGE:
     cvisor [OPTIONS] cp <SRC> <DST>      copy a file/dir in/out of the sandbox
     cvisor [OPTIONS] cache save    <KEY> <sb:PATH>   back up a sandbox dir
     cvisor [OPTIONS] cache restore <KEY> <sb:PATH>   restore into a sandbox dir
+    cvisor [OPTIONS] cache ls                        list cached archives
+    cvisor [OPTIONS] cache rm <KEY> | --all          delete cache entries
     cvisor doctor                        check the host can run the sandbox
 
     In `cp`, prefix the sandbox side with `sb:` — e.g.
@@ -60,16 +62,16 @@ OPTIONS:
     enum Action {
         Run(Vec<String>),
         Interactive,
-        Cp {
-            src: String,
-            dst: String,
-        },
-        Cache {
-            restore: bool,
-            key: String,
-            path: String,
-        },
+        Cp { src: String, dst: String },
+        Cache(CacheCmd),
         Doctor,
+    }
+
+    enum CacheCmd {
+        Save { key: String, path: String },
+        Restore { key: String, path: String },
+        Ls,
+        Rm { key: Option<String> }, // None = --all
     }
 
     struct Opts {
@@ -114,15 +116,29 @@ OPTIONS:
                     break;
                 }
                 "cache" => {
-                    let op = args.next().ok_or("cache needs save|restore")?;
-                    let restore = match op.as_str() {
-                        "save" => false,
-                        "restore" => true,
+                    let op = args.next().ok_or("cache needs save|restore|ls|rm")?;
+                    let cmd = match op.as_str() {
+                        "save" | "restore" => {
+                            let key = args.next().ok_or("cache needs <KEY> <sb:PATH>")?;
+                            let path = args.next().ok_or("cache needs <sb:PATH>")?;
+                            if op == "save" {
+                                CacheCmd::Save { key, path }
+                            } else {
+                                CacheCmd::Restore { key, path }
+                            }
+                        }
+                        "ls" => CacheCmd::Ls,
+                        "rm" => {
+                            let arg = args.next().ok_or("cache rm needs <KEY> or --all")?;
+                            if arg == "--all" {
+                                CacheCmd::Rm { key: None }
+                            } else {
+                                CacheCmd::Rm { key: Some(arg) }
+                            }
+                        }
                         other => return Err(format!("unknown cache op: {other}")),
                     };
-                    let key = args.next().ok_or("cache needs <KEY> <sb:PATH>")?;
-                    let path = args.next().ok_or("cache needs <sb:PATH>")?;
-                    action = Action::Cache { restore, key, path };
+                    action = Action::Cache(cmd);
                     break;
                 }
                 "doctor" => {
@@ -178,28 +194,14 @@ OPTIONS:
         match &opts.action {
             Action::Run(cmd) if !cmd.is_empty() => run_command(uid, cmd, opts.exec),
             Action::Cp { src, dst } => cmd_cp(uid, src, dst),
-            Action::Cache { restore, key, path } => {
-                cmd_cache(uid, *restore, key, path, opts.format, &opts.cache_backend)
-            }
+            Action::Cache(cmd) => cmd_cache(uid, cmd, opts.format, &opts.cache_backend),
             Action::Doctor => cmd_doctor(),
             _ => run_interactive(uid, opts.exec),
         }
     }
 
-    /// `cvisor cache save|restore`: archive a sandbox directory to (or from) the
-    /// configured backend, keyed by name.
-    fn cmd_cache(
-        uid: [u8; 16],
-        restore: bool,
-        key: &str,
-        path: &str,
-        format: Format,
-        backend_spec: &str,
-    ) -> i32 {
-        let Some(sb_path) = path.strip_prefix("sb:") else {
-            eprintln!("cvisor: cache <sb:PATH> must be a sandbox path (prefix sb:)");
-            return 2;
-        };
+    /// `cvisor cache …`: manage the directory cache in the configured backend.
+    fn cmd_cache(uid: [u8; 16], cmd: &CacheCmd, format: Format, backend_spec: &str) -> i32 {
         let backend = match cache::Backend::parse(backend_spec) {
             Ok(b) => b,
             Err(e) => {
@@ -207,18 +209,76 @@ OPTIONS:
                 return 2;
             }
         };
-        let res = if restore {
-            cache::restore(uid, sb_path, key, &backend, format)
-        } else {
-            cache::save(uid, sb_path, key, &backend, format)
+        let sandbox_path = |path: &str| -> Result<String, i32> {
+            path.strip_prefix("sb:").map(str::to_string).ok_or_else(|| {
+                eprintln!("cvisor: cache <sb:PATH> must be a sandbox path (prefix sb:)");
+                2
+            })
         };
-        match res {
+        let report = |verb: &str, r: cvisor_core::SysResult<()>| match r {
             Ok(()) => 0,
             Err(e) => {
-                let verb = if restore { "restore" } else { "save" };
                 eprintln!("cvisor: cache {verb} failed: {e}");
                 1
             }
+        };
+        match cmd {
+            CacheCmd::Save { key, path } => match sandbox_path(path) {
+                Ok(p) => report("save", cache::save(uid, &p, key, &backend, format)),
+                Err(c) => c,
+            },
+            CacheCmd::Restore { key, path } => match sandbox_path(path) {
+                Ok(p) => report("restore", cache::restore(uid, &p, key, &backend, format)),
+                Err(c) => c,
+            },
+            CacheCmd::Ls => match cache::list(&backend) {
+                Ok(entries) => {
+                    for e in entries {
+                        println!("{:>12}  {}", human_size(e.size), e.name);
+                    }
+                    0
+                }
+                Err(e) => {
+                    eprintln!("cvisor: cache ls failed: {e}");
+                    1
+                }
+            },
+            CacheCmd::Rm { key: Some(key) } => match cache::remove(key, &backend, format) {
+                Ok(true) => 0,
+                Ok(false) => {
+                    eprintln!("cvisor: no cache entry for key '{key}'");
+                    1
+                }
+                Err(e) => {
+                    eprintln!("cvisor: cache rm failed: {e}");
+                    1
+                }
+            },
+            CacheCmd::Rm { key: None } => match cache::clear(&backend) {
+                Ok(n) => {
+                    println!("removed {n} cache entr{}", if n == 1 { "y" } else { "ies" });
+                    0
+                }
+                Err(e) => {
+                    eprintln!("cvisor: cache rm --all failed: {e}");
+                    1
+                }
+            },
+        }
+    }
+
+    fn human_size(n: u64) -> String {
+        const U: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+        let mut v = n as f64;
+        let mut i = 0;
+        while v >= 1024.0 && i < U.len() - 1 {
+            v /= 1024.0;
+            i += 1;
+        }
+        if i == 0 {
+            format!("{n} B")
+        } else {
+            format!("{v:.1} {}", U[i])
         }
     }
 

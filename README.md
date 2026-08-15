@@ -88,6 +88,8 @@ cvisor --sandbox dev cp sb:/app/dist ./dist        # sandbox -> host (recursive)
 # Cache a directory (backup/restore, keyed) — for build caches, deps, etc.:
 cvisor --sandbox dev cache save deps-v1 sb:/app/node_modules
 cvisor --sandbox ci  cache restore deps-v1 sb:/app/node_modules   # exact or prefix hit
+cvisor cache ls                    # list cached archives
+cvisor cache rm deps-v1            # remove one, or `cache rm --all`
 
 # Check the host can run the sandbox:
 cvisor doctor
@@ -109,15 +111,16 @@ all formats and the S3 backend.
 
 ### Docker
 
-An Alpine image with the CLI is built from the repo `Dockerfile`. cVisor
-installs its own seccomp filter, so run with the default profile disabled:
+A prebuilt Alpine image (all features — every archive format and the S3 cache
+backend) is published to GHCR. cVisor installs its own seccomp filter, so run
+with the default profile disabled:
 
 ```bash
-docker build -t cvisor .
-docker run --rm -it --security-opt seccomp=unconfined cvisor           # interactive shell
-docker run --rm --security-opt seccomp=unconfined cvisor -- uname -a    # run a command
+docker run --rm -it --security-opt seccomp=unconfined ghcr.io/tsirysndr/cvisor           # interactive shell
+docker run --rm --security-opt seccomp=unconfined ghcr.io/tsirysndr/cvisor -- uname -a    # run a command
 ```
 
+Or build it yourself from the repo `Dockerfile` (`docker build -t cvisor .`).
 Prebuilt static binaries for linux x86_64 and aarch64 are attached to each
 [GitHub Release](https://github.com/tsirysndr/cVisor/releases) (tag `v*`).
 
