@@ -298,7 +298,14 @@ fn cmd_ffi(args: &[String]) -> bool {
     } else {
         // Dynamic musl cdylib: disable crt-static and link via zig.
         run(Command::new("cargo")
-            .args(["zigbuild", "-p", "cvisor-ffi", "--target", &target, "--release"])
+            .args([
+                "zigbuild",
+                "-p",
+                "cvisor-ffi",
+                "--target",
+                &target,
+                "--release",
+            ])
             .env("RUSTFLAGS", "-C target-feature=-crt-static"))
     };
     if !built {
