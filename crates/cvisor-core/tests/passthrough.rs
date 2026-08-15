@@ -308,3 +308,29 @@ fn network_disabled_blocks_inet_socket() {
     );
     assert_eq!(out, "still-alive\n");
 }
+
+#[test]
+fn loopback_ping_socket_roundtrip() {
+    // A loopback ping exercises the full socket path — socket, bind (ping binds
+    // a local ICMP datagram socket), sendto, recvfrom — with no external
+    // dependency. It would fail if bind were blocked again.
+    let (out, _err, code) = run_code("ping -c1 -W2 127.0.0.1");
+    assert_eq!(code, 0, "loopback ping failed: {out:?}");
+    assert!(out.contains("1 packets received"), "ping output: {out:?}");
+}
+
+#[test]
+fn dns_resolver_can_bind_udp_socket() {
+    // Regression: cVisor blocked bind() outright, so every DNS resolver died
+    // with "bind: Operation not permitted" — the reason `wget https://host`
+    // failed by hostname. A resolver must be able to bind a local ephemeral
+    // port. We assert the bind-denied signature is absent rather than that
+    // resolution succeeds, so the test stays valid without external network
+    // (offline it may fail to resolve, but never with a bind EPERM).
+    let (out, err, _code) = run_code("nslookup github.com 2>&1 || true");
+    let combined = format!("{out}{err}");
+    assert!(
+        !combined.contains("Operation not permitted") && !combined.contains("bind:"),
+        "resolver hit a blocked bind(): {combined:?}"
+    );
+}

@@ -144,6 +144,22 @@ impl Backend {
         Ok(())
     }
 
+    pub fn bind(&self, addr: &[u8]) -> SysResult<()> {
+        let fd = self.as_socket_fd()?;
+        // SAFETY: fd is a real socket; addr is a valid sockaddr of addr.len().
+        let rc = unsafe {
+            libc::bind(
+                fd,
+                addr.as_ptr() as *const libc::sockaddr,
+                addr.len() as libc::socklen_t,
+            )
+        };
+        if rc < 0 {
+            return Err(last_errno());
+        }
+        Ok(())
+    }
+
     pub fn shutdown(&self, how: i32) -> SysResult<()> {
         let fd = self.as_socket_fd()?;
         // SAFETY: fd is a real socket.

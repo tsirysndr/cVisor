@@ -67,6 +67,10 @@ impl File {
         self.backend.connect(addr)
     }
 
+    pub fn bind(&self, addr: &[u8]) -> SysResult<()> {
+        self.backend.bind(addr)
+    }
+
     pub fn shutdown(&self, how: i32) -> SysResult<()> {
         self.backend.shutdown(how)
     }

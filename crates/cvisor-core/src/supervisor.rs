@@ -237,6 +237,8 @@ impl Supervisor {
             self.sys_readv(notif)
         } else if nr == libc::SYS_socket {
             self.sys_socket(notif)
+        } else if nr == libc::SYS_bind {
+            self.sys_bind(notif)
         } else if nr == libc::SYS_socketpair {
             self.sys_socketpair(notif)
         } else if nr == libc::SYS_connect {
@@ -1545,6 +1547,31 @@ impl Supervisor {
         Ok(notif::reply_success(notif.id, 0))
     }
 
+    /// bind: allowed for a client socket binding a local ephemeral port (what a
+    /// UDP resolver does, and what a TCP client may do to pin a source address).
+    /// Binding an INET/INET6 socket to a *fixed* port is denied — combined with
+    /// the `listen`/`accept` block, this keeps the guest from standing up a
+    /// reachable service. AF_UNIX and other families pass through.
+    fn sys_bind(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
+        use crate::error::{Errno, SysError};
+        let caller = notif.pid as i32;
+        let fd = notif.data.args[0] as i32;
+        let addr_ptr = notif.data.args[1];
+        let addrlen = notif.data.args[2] as usize;
+        if addrlen == 0 || addrlen > 128 {
+            return Err(SysError(Errno::INVAL));
+        }
+        let file = self.caller_fd(caller, fd).ok_or(SysError(Errno::BADF))?;
+        let mut addr = vec![0u8; addrlen];
+        self.mem.read_bytes(caller, addr_ptr, &mut addr)?;
+
+        if let Some(errno) = bind_policy(self.allow_network, &addr) {
+            return Err(SysError(errno));
+        }
+        file.bind(&addr)?;
+        Ok(notif::reply_success(notif.id, 0))
+    }
+
     fn sys_connect(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
         use crate::error::{Errno, SysError};
         let caller = notif.pid as i32;
@@ -2210,15 +2237,47 @@ fn remap(notif: &SeccompNotif, args: [u64; 6]) -> SeccompNotif {
 /// to the host and mutate real files are denied here (`linkat`, `mknodat`,
 /// `fchownat`, `truncate` → `EPERM`) rather than continued. `rename`/`renameat`
 /// are *not* in this list: they are virtualized by `sys_renameat`.
+/// Decide whether a `bind(2)` on a socket is allowed, given the sandbox network
+/// policy and the target sockaddr. `None` = allow; `Some(errno)` = deny.
+///
+/// INET/INET6 binds are denied when networking is off, or when they target a
+/// fixed (non-zero) port — an ephemeral bind (port 0) is the normal client case
+/// (UDP resolvers, TCP source-address pinning) and is allowed. Other address
+/// families (AF_UNIX, AF_NETLINK, …) are not restricted here.
+fn bind_policy(allow_network: bool, addr: &[u8]) -> Option<crate::error::Errno> {
+    use crate::error::Errno;
+    // Need at least family (u16) + port (u16) to classify an INET bind.
+    if addr.len() < 4 {
+        return None;
+    }
+    let family = u16::from_ne_bytes([addr[0], addr[1]]) as i32;
+    if family != libc::AF_INET && family != libc::AF_INET6 {
+        return None;
+    }
+    if !allow_network {
+        return Some(Errno::PERM);
+    }
+    // sin_port / sin6_port both sit at offset 2, in network byte order.
+    let port = u16::from_be_bytes([addr[2], addr[3]]);
+    if port != 0 {
+        return Some(Errno::PERM);
+    }
+    None
+}
+
 fn blocked_errno(nr: i64) -> Option<crate::error::Errno> {
     use crate::error::Errno;
 
+    // Server-side networking: block `listen`/`accept` so the guest cannot serve
+    // TCP. `bind` is NOT here — it is a normal client operation (UDP resolvers
+    // bind a local ephemeral port, TCP clients may bind a source address), so it
+    // is virtualized by `sys_bind`, which only rejects binding a fixed port.
     // accept exists only on x86_64; aarch64 uses accept4.
     #[cfg(target_arch = "x86_64")]
     if nr == libc::SYS_accept {
         return Some(Errno::PERM);
     }
-    if nr == libc::SYS_bind || nr == libc::SYS_listen || nr == libc::SYS_accept4 {
+    if nr == libc::SYS_listen || nr == libc::SYS_accept4 {
         return Some(Errno::PERM);
     }
 
@@ -2611,12 +2670,33 @@ mod tests {
             let resp = sup.handle(&notif(nr, [0; 6]));
             assert_eq!(resp.error, -(crate::error::Errno::NOSYS.code()), "nr={nr}");
         }
-        // bind/listen → EPERM (inbound networking).
-        for nr in [libc::SYS_bind, libc::SYS_listen] {
-            let resp = sup.handle(&notif(nr, [0; 6]));
-            assert_eq!(resp.error, -(crate::error::Errno::PERM.code()), "nr={nr}");
-        }
+        // listen → EPERM (no inbound servers; bind is allowed for clients).
+        let resp = sup.handle(&notif(libc::SYS_listen, [0; 6]));
+        assert_eq!(resp.error, -(crate::error::Errno::PERM.code()));
         sup.state.lock().unwrap().overlay.cleanup();
+    }
+
+    #[test]
+    fn bind_policy_allows_ephemeral_denies_fixed_port() {
+        use crate::error::Errno;
+        // sockaddr_in: family (native u16) + port (big-endian u16) + addr.
+        let sa_in = |port: u16| {
+            let mut a = vec![0u8; 16];
+            a[0..2].copy_from_slice(&(libc::AF_INET as u16).to_ne_bytes());
+            a[2..4].copy_from_slice(&port.to_be_bytes());
+            a
+        };
+        // Ephemeral (port 0) is the client case → allowed.
+        assert_eq!(bind_policy(true, &sa_in(0)), None);
+        // A fixed port would stand up a service → denied.
+        assert_eq!(bind_policy(true, &sa_in(8080)), Some(Errno::PERM));
+        // With networking off, even an ephemeral INET bind is denied.
+        assert_eq!(bind_policy(false, &sa_in(0)), Some(Errno::PERM));
+        // AF_UNIX (family 1) is not an INET bind → not restricted here.
+        let mut unix = vec![0u8; 16];
+        unix[0..2].copy_from_slice(&(libc::AF_UNIX as u16).to_ne_bytes());
+        assert_eq!(bind_policy(true, &unix), None);
+        assert_eq!(bind_policy(false, &unix), None);
     }
 
     #[test]
