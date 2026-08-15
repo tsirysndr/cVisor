@@ -70,4 +70,15 @@ await eq(
   shell.close();
 }
 
+// File transfer in/out of the sandbox overlay.
+{
+  const sb4 = new Sandbox();
+  sb4.writeFile("/tmp/data.txt", "seeded\n");
+  await eq(sb4.runCmd("grep seeded /tmp/data.txt"), "seeded\n", "writeFile visible to run");
+  sb4.runCmd("echo from-run > /tmp/out.txt");
+  const back = new TextDecoder().decode(sb4.readFile("/tmp/out.txt"));
+  assert(back === "from-run\n", `readFile got ${JSON.stringify(back)}`);
+  sb4.setAllowListen(true); // smoke: does not throw
+}
+
 console.log("BUN_SDK_OK");

@@ -34,6 +34,20 @@ idempotent.
 
 ;; Egress kill switch — deny outbound INET/INET6 sockets (default allowed):
 (cvisor/set-allow-network! sb false)
+
+;; Inbound TCP servers (bind fixed port, listen) — off by default:
+(cvisor/set-allow-listen! sb true)
+```
+
+## Files
+
+Transfer files in and out of the sandbox overlay without running a command; a
+file written this way is visible to later `run`s of the same sandbox:
+
+```clojure
+(cvisor/write-file sb "/app/config.json" "{\"k\":1}")
+(cvisor/run sb "cat /app/config.json")
+(String. (cvisor/read-file sb "/tmp/result.txt") "UTF-8")
 ```
 
 Add `--enable-native-access=ALL-UNNAMED` to your JVM options to silence the

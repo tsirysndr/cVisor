@@ -54,6 +54,9 @@
        :sandbox-free        (bind "cvisor_sandbox_free" (fd nil ptr))
        :set-log-level       (bind "cvisor_sandbox_set_log_level" (fd nil ptr int32))
        :set-allow-network   (bind "cvisor_sandbox_set_allow_network" (fd nil ptr int32))
+       :set-allow-listen    (bind "cvisor_sandbox_set_allow_listen" (fd nil ptr int32))
+       :write-file          (bind "cvisor_sandbox_write_file" (fd int32 ptr ptr ptr size-t))
+       :read-file           (bind "cvisor_sandbox_read_file" (fd ptr ptr ptr ptr))
        :run                 (bind "cvisor_run" (fd ptr ptr ptr))
        :run-timeout         (bind "cvisor_run_timeout" (fd ptr ptr ptr size-t))
        :output-free         (bind "cvisor_output_free" (fd nil ptr))
@@ -116,6 +119,43 @@
   When off, the guest's attempts to create internet sockets are denied."
   [^Sandbox sb allow?]
   (call :set-allow-network (live-ptr sb) (if allow? (int 1) (int 0))))
+
+(defn set-allow-listen!
+  "Enable or disable inbound TCP servers (bind a fixed port, listen, accept).
+  Off by default (outbound-only)."
+  [^Sandbox sb allow?]
+  (call :set-allow-listen (live-ptr sb) (if allow? (int 1) (int 0))))
+
+(defn write-file
+  "Write bytes (or a String) to `path` inside the sandbox overlay. The file is
+  visible to later `run`s of the same sandbox. Throws on failure."
+  [^Sandbox sb ^String path data]
+  (let [bytes (if (bytes? data) data (.getBytes ^String data StandardCharsets/UTF_8))
+        n     (alength ^bytes bytes)]
+    (with-open [arena (Arena/ofConfined)]
+      (let [cpath (.allocateFrom arena path)
+            seg   (.allocate arena (long (max n 1)))]
+        (when (pos? n)
+          (MemorySegment/copy ^bytes bytes 0 seg ^ValueLayout$OfByte ValueLayout/JAVA_BYTE 0 n))
+        (let [rc (call :write-file (live-ptr sb) cpath seg (long n))]
+          (when-not (zero? rc)
+            (throw (ex-info (str "write-file failed (errno " (- rc) ")") {:path path :errno (- rc)}))))))))
+
+(defn read-file
+  "Read `path` from the sandbox overlay (the guest's view) and return the bytes.
+  Returns an empty byte array for an empty file."
+  ^bytes [^Sandbox sb ^String path]
+  (with-open [arena (Arena/ofConfined)]
+    (let [cpath (.allocateFrom arena path)
+          len   (.allocate arena ^MemoryLayout ValueLayout/JAVA_LONG)
+          ptr   (call :read-file (live-ptr sb) cpath len)
+          n     (.get len ^ValueLayout$OfLong ValueLayout/JAVA_LONG 0)]
+      (if (or (null-seg? ptr) (zero? n))
+        (byte-array 0)
+        (try
+          (.toArray (.reinterpret ^MemorySegment ptr n) ^ValueLayout$OfByte ValueLayout/JAVA_BYTE)
+          (finally
+            (call :bytes-free ptr n)))))))
 
 (defn run
   "Run a shell command in the sandbox, blocking until it exits. Returns

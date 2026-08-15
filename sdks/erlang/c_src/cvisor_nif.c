@@ -11,6 +11,7 @@
 
 #include <erl_nif.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,9 @@ typedef uint8_t *(*fn_out_get)(void *, size_t *);
 typedef int (*fn_out_exit_code)(void *);
 typedef void (*fn_bytes_free)(uint8_t *, size_t);
 typedef void (*fn_set_allow_network)(void *, int);
+typedef void (*fn_set_allow_listen)(void *, int);
+typedef int (*fn_write_file)(void *, const char *, const uint8_t *, size_t);
+typedef uint8_t *(*fn_read_file)(void *, const char *, size_t *);
 
 typedef void *(*fn_session_start)(void *, const char *, int);
 typedef uint8_t *(*fn_session_read)(void *, size_t *);
@@ -43,6 +47,9 @@ static fn_out_get p_stderr;
 static fn_out_exit_code p_exit_code;
 static fn_bytes_free p_bytes_free;
 static fn_set_allow_network p_set_allow_network;
+static fn_set_allow_listen p_set_allow_listen;
+static fn_write_file p_write_file;
+static fn_read_file p_read_file;
 
 static fn_session_start p_session_start;
 static fn_session_read p_session_read_stdout;
@@ -65,6 +72,8 @@ typedef struct {
 
 /* Applied to each sandbox before running; default allow (matches libcvisor). */
 static int g_allow_network = 1;
+/* Applied to each sandbox before running; default deny (matches libcvisor). */
+static int g_allow_listen = 0;
 
 static int load_lib(void) {
     const char *path = getenv("CVISOR_LIB");
@@ -84,6 +93,10 @@ static int load_lib(void) {
     p_bytes_free = (fn_bytes_free)dlsym(g_lib, "cvisor_bytes_free");
     p_set_allow_network =
         (fn_set_allow_network)dlsym(g_lib, "cvisor_sandbox_set_allow_network");
+    p_set_allow_listen =
+        (fn_set_allow_listen)dlsym(g_lib, "cvisor_sandbox_set_allow_listen");
+    p_write_file = (fn_write_file)dlsym(g_lib, "cvisor_sandbox_write_file");
+    p_read_file = (fn_read_file)dlsym(g_lib, "cvisor_sandbox_read_file");
 
     p_session_start = (fn_session_start)dlsym(g_lib, "cvisor_session_start");
     p_session_read_stdout =
@@ -101,6 +114,7 @@ static int load_lib(void) {
 
     return p_new && p_free && p_run_timeout && p_out_free && p_stdout &&
            p_stderr && p_exit_code && p_bytes_free && p_set_allow_network &&
+           p_set_allow_listen && p_write_file && p_read_file &&
            p_session_start && p_session_read_stdout && p_session_read_stderr &&
            p_session_write_stdin && p_session_resize && p_session_try_wait &&
            p_session_wait && p_session_kill && p_session_free;
@@ -144,6 +158,7 @@ static ERL_NIF_TERM run_nif(ErlNifEnv *env, int argc,
                                 enif_make_atom(env, "sandbox_new_failed"));
     }
     p_set_allow_network(sb, g_allow_network);
+    p_set_allow_listen(sb, g_allow_listen);
 
     void *out = p_run_timeout(sb, cmd, (uint64_t)timeout_ms);
     enif_free(cmd);
@@ -171,6 +186,16 @@ static ERL_NIF_TERM set_allow_network_nif(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
     g_allow_network = allow ? 1 : 0;
+    return enif_make_atom(env, "ok");
+}
+
+static ERL_NIF_TERM set_allow_listen_nif(ErlNifEnv *env, int argc,
+                                         const ERL_NIF_TERM argv[]) {
+    int allow;
+    if (argc != 1 || !enif_get_int(env, argv[0], &allow)) {
+        return enif_make_badarg(env);
+    }
+    g_allow_listen = allow ? 1 : 0;
     return enif_make_atom(env, "ok");
 }
 
@@ -228,6 +253,7 @@ static ERL_NIF_TERM session_start_nif(ErlNifEnv *env, int argc,
                                 enif_make_atom(env, "sandbox_new_failed"));
     }
     p_set_allow_network(sb, g_allow_network);
+    p_set_allow_listen(sb, g_allow_listen);
 
     void *sess = p_session_start(sb, cmd, pty);
     if (cmd) {
@@ -364,6 +390,98 @@ static ERL_NIF_TERM session_free_nif(ErlNifEnv *env, int argc,
     return enif_make_atom(env, "ok");
 }
 
+/* Map a positive errno to a lowercase atom (eacces, enoent, ...), falling
+ * back to a generic write_failed for anything unrecognised. */
+static ERL_NIF_TERM errno_atom(ErlNifEnv *env, int err) {
+    switch (err) {
+    case EACCES:
+        return enif_make_atom(env, "eacces");
+    case ENOENT:
+        return enif_make_atom(env, "enoent");
+    case ENOSPC:
+        return enif_make_atom(env, "enospc");
+    case EROFS:
+        return enif_make_atom(env, "erofs");
+    case EISDIR:
+        return enif_make_atom(env, "eisdir");
+    case ENOTDIR:
+        return enif_make_atom(env, "enotdir");
+    case EINVAL:
+        return enif_make_atom(env, "einval");
+    case ENOMEM:
+        return enif_make_atom(env, "enomem");
+    default:
+        return enif_make_atom(env, "write_failed");
+    }
+}
+
+/* Write DataBin to PathBin inside the session's sandbox overlay, visible to
+ * later runs on the SAME session (same sandbox/uid). */
+static ERL_NIF_TERM session_write_file_nif(ErlNifEnv *env, int argc,
+                                           const ERL_NIF_TERM argv[]) {
+    session_t *s;
+    ErlNifBinary path_bin, data_bin;
+    if (argc != 3 || !get_session(env, argv[0], &s) ||
+        !enif_inspect_binary(env, argv[1], &path_bin) ||
+        !enif_inspect_binary(env, argv[2], &data_bin)) {
+        return enif_make_badarg(env);
+    }
+    if (s->freed) {
+        return enif_make_badarg(env);
+    }
+
+    char *path = enif_alloc(path_bin.size + 1);
+    if (!path) {
+        return enif_raise_exception(env, enif_make_atom(env, "enomem"));
+    }
+    memcpy(path, path_bin.data, path_bin.size);
+    path[path_bin.size] = '\0';
+
+    int rc = p_write_file(s->sb, path, data_bin.data, data_bin.size);
+    enif_free(path);
+    if (rc == 0) {
+        return enif_make_atom(env, "ok");
+    }
+    return enif_make_tuple2(env, enif_make_atom(env, "error"),
+                            errno_atom(env, rc < 0 ? -rc : rc));
+}
+
+/* Read PathBin from the session's sandbox overlay, returning the bytes as a
+ * binary (empty binary for an empty or missing file). */
+static ERL_NIF_TERM session_read_file_nif(ErlNifEnv *env, int argc,
+                                          const ERL_NIF_TERM argv[]) {
+    session_t *s;
+    ErlNifBinary path_bin;
+    if (argc != 2 || !get_session(env, argv[0], &s) ||
+        !enif_inspect_binary(env, argv[1], &path_bin)) {
+        return enif_make_badarg(env);
+    }
+    if (s->freed) {
+        return enif_make_badarg(env);
+    }
+
+    char *path = enif_alloc(path_bin.size + 1);
+    if (!path) {
+        return enif_raise_exception(env, enif_make_atom(env, "enomem"));
+    }
+    memcpy(path, path_bin.data, path_bin.size);
+    path[path_bin.size] = '\0';
+
+    size_t len = 0;
+    uint8_t *data = p_read_file(s->sb, path, &len);
+    enif_free(path);
+
+    ErlNifBinary bin;
+    enif_alloc_binary(len, &bin);
+    if (len > 0 && data) {
+        memcpy(bin.data, data, len);
+    }
+    if (data) {
+        p_bytes_free(data, len);
+    }
+    return enif_make_binary(env, &bin);
+}
+
 static int on_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
     (void)priv_data;
     (void)load_info;
@@ -379,6 +497,7 @@ static ErlNifFunc nif_funcs[] = {
     /* Marked dirty (I/O bound): a run blocks until the guest exits. */
     {"run_nif", 2, run_nif, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"set_allow_network_nif", 1, set_allow_network_nif, 0},
+    {"set_allow_listen_nif", 1, set_allow_listen_nif, 0},
     {"session_start_nif", 2, session_start_nif, 0},
     {"session_read_stdout_nif", 1, session_read_stdout_nif, 0},
     {"session_read_stderr_nif", 1, session_read_stderr_nif, 0},
@@ -389,6 +508,8 @@ static ErlNifFunc nif_funcs[] = {
     {"session_wait_nif", 1, session_wait_nif, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"session_kill_nif", 1, session_kill_nif, 0},
     {"session_free_nif", 1, session_free_nif, 0},
+    {"session_write_file_nif", 3, session_write_file_nif, 0},
+    {"session_read_file_nif", 2, session_read_file_nif, 0},
 };
 
 ERL_NIF_INIT(cvisor, nif_funcs, on_load, NULL, NULL, NULL)

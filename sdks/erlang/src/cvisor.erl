@@ -7,11 +7,12 @@
 %% path, otherwise it is loaded from the application's priv directory.
 -module(cvisor).
 
--export([run/1, run/2, set_allow_network/1]).
+-export([run/1, run/2, set_allow_network/1, set_allow_listen/1]).
 -export([run_streaming/1, run_streaming/2, shell/0, shell/1]).
 -export([session_start/2, session_read_stdout/1, session_read_stderr/1,
          session_write/2, session_resize/3, session_try_wait/1,
-         session_wait/1, session_kill/1, session_free/1]).
+         session_wait/1, session_kill/1, session_free/1,
+         session_write_file/3, session_read_file/2]).
 -on_load(init/0).
 
 -type session() :: reference().
@@ -43,6 +44,15 @@ set_allow_network(true) ->
     set_allow_network_nif(1);
 set_allow_network(false) ->
     set_allow_network_nif(0).
+
+%% @doc Allow or deny inbound TCP servers (binding a fixed port, `listen',
+%% and `accept') for sandboxes created by subsequent runs and sessions. The
+%% default is to deny.
+-spec set_allow_listen(boolean()) -> ok.
+set_allow_listen(true) ->
+    set_allow_listen_nif(1);
+set_allow_listen(false) ->
+    set_allow_listen_nif(0).
 
 %% @doc Start a streaming session for `Cmd', draining stdout/stderr in the
 %% calling process until the command exits. Equivalent to
@@ -196,11 +206,37 @@ session_kill(S) ->
 session_free(S) ->
     session_free_nif(S).
 
+%% @doc Write `Data' to `Path' inside the session's sandbox filesystem
+%% overlay. Because the write targets the session's own sandbox (a stable
+%% uid held for the session's lifetime), the file is visible to later
+%% commands run on the SAME session (e.g. via {@link session_write/2} to a
+%% PTY shell). Returns `ok', or `{error, Reason}' where `Reason' is an errno
+%% atom such as `eacces' or `enospc'.
+%%
+%% Note: this operates on the session's sandbox, not a global one. The
+%% top-level {@link run/1} and {@link run_streaming/2} each create a fresh
+%% sandbox with a new uid, so files seeded here are NOT visible to those
+%% calls — only to the session that owns them.
+-spec session_write_file(session(), binary(), binary()) -> ok | {error, atom()}.
+session_write_file(S, Path, Data) when is_binary(Path), is_binary(Data) ->
+    session_write_file_nif(S, Path, Data).
+
+%% @doc Read `Path' from the session's sandbox filesystem overlay (the
+%% guest's view, including files written by earlier commands on this session
+%% or by {@link session_write_file/3}). Returns the file's bytes as a binary,
+%% or `<<>>' for an empty or missing file.
+-spec session_read_file(session(), binary()) -> binary().
+session_read_file(S, Path) when is_binary(Path) ->
+    session_read_file_nif(S, Path).
+
 %% NIF stubs — replaced on load.
 run_nif(_Command, _TimeoutMs) ->
     erlang:nif_error(nif_not_loaded).
 
 set_allow_network_nif(_Allow) ->
+    erlang:nif_error(nif_not_loaded).
+
+set_allow_listen_nif(_Allow) ->
     erlang:nif_error(nif_not_loaded).
 
 session_start_nif(_Cmd, _Pty) ->
@@ -228,6 +264,12 @@ session_kill_nif(_S) ->
     erlang:nif_error(nif_not_loaded).
 
 session_free_nif(_S) ->
+    erlang:nif_error(nif_not_loaded).
+
+session_write_file_nif(_S, _Path, _Data) ->
+    erlang:nif_error(nif_not_loaded).
+
+session_read_file_nif(_S, _Path) ->
     erlang:nif_error(nif_not_loaded).
 
 init() ->

@@ -55,6 +55,14 @@
       (is (re-find #"IS_TTY" @out))
       (.close sh))))
 
+(deftest file-io
+  (with-open [sb (cvisor/sandbox)]
+    (cvisor/write-file sb "/tmp/data.txt" "seeded\n")
+    (is (= "seeded\n" (:stdout (cvisor/run sb "grep seeded /tmp/data.txt"))))
+    (cvisor/run sb "echo from-run > /tmp/out.txt")
+    (is (= "from-run\n" (String. (cvisor/read-file sb "/tmp/out.txt") "UTF-8")))
+    (cvisor/set-allow-listen! sb true)))
+
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'cvisor.sandbox-test)]
     (if (zero? (+ fail error))

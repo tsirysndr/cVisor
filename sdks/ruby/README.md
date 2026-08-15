@@ -33,6 +33,30 @@ the sandbox (allowed by default):
 sb.set_allow_network(false)  # deny outbound networking
 ```
 
+`Sandbox#set_allow_listen(allow)` toggles inbound TCP servers (listening
+sockets) inside the sandbox (denied by default):
+
+```ruby
+sb.set_allow_listen(true)  # allow inbound TCP servers
+```
+
+## Files
+
+`Sandbox#write_file(path, data)` seeds a file into the sandbox's persistent
+overlay at an absolute `path`; it is visible to later `#run` calls of the same
+`Sandbox` instance. `Sandbox#read_file(path)` returns the guest's view of an
+absolute `path` (the overlay copy if present, else the real host file for cow
+paths) as a binary `String` (`""` for an empty or missing file). Paths must be
+absolute; `/proc` and passthrough paths are not writable.
+
+```ruby
+sb.write_file("/tmp/data.txt", "seeded\n")
+sb.run("grep seeded /tmp/data.txt").stdout  # "seeded\n"
+
+sb.run("echo from-run > /tmp/out.txt")
+sb.read_file("/tmp/out.txt")                # "from-run\n"
+```
+
 ## Streaming sessions
 
 `Sandbox#run_streaming(command, on_stdout:, on_stderr:, poll_ms: 15)` starts a

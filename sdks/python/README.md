@@ -66,6 +66,33 @@ assert out.exit_code == 137
 sb.set_allow_network(False)  # deny outbound networking
 ```
 
+`Sandbox.set_allow_listen(allow)` controls inbound TCP servers (`listen`/
+`accept`), denied by default:
+
+```python
+sb.set_allow_listen(True)  # allow the guest to run TCP servers
+```
+
+### Files
+
+`Sandbox.write_file(path, data)` writes `data` (`bytes` or `str`) into the
+sandbox's persistent overlay, and `Sandbox.read_file(path)` returns the file's
+bytes as the guest sees it (the overlay copy, else the real host file for cow
+paths). `path` must be absolute; `/proc` and passthrough paths are not writable.
+Files written are visible to later `run` calls of the same `Sandbox` instance:
+
+```python
+with Sandbox() as sb:
+    sb.write_file("/tmp/data.txt", "seeded\n")
+    print(sb.run("cat /tmp/data.txt").stdout)   # "seeded\n"
+
+    sb.run("echo from-run > /tmp/out.txt")
+    print(sb.read_file("/tmp/out.txt"))         # b"from-run\n"
+```
+
+`write_file` raises `OSError` on failure; `read_file` returns `b""` for an empty
+file and raises `FileNotFoundError` for a missing or unreadable path.
+
 ### Streaming output
 
 `Sandbox.run_streaming(cmd, on_stdout=..., on_stderr=..., poll_ms=15)` runs a

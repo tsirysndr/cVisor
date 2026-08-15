@@ -27,6 +27,18 @@ const { symbols } = dlopen(libraryPath(), {
     args: [FFIType.ptr, FFIType.i32],
     returns: FFIType.void,
   },
+  cvisor_sandbox_set_allow_listen: {
+    args: [FFIType.ptr, FFIType.i32],
+    returns: FFIType.void,
+  },
+  cvisor_sandbox_write_file: {
+    args: [FFIType.ptr, FFIType.cstring, FFIType.ptr, FFIType.u64],
+    returns: FFIType.i32,
+  },
+  cvisor_sandbox_read_file: {
+    args: [FFIType.ptr, FFIType.cstring, FFIType.ptr],
+    returns: FFIType.ptr,
+  },
   cvisor_run: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.ptr },
   cvisor_run_timeout: {
     args: [FFIType.ptr, FFIType.cstring, FFIType.u64],
@@ -124,6 +136,31 @@ export class Sandbox {
   /** Enable or disable outbound INET/INET6 networking (default on). */
   setAllowNetwork(allow: boolean): void {
     symbols.cvisor_sandbox_set_allow_network(this.ptr, allow ? 1 : 0);
+  }
+
+  /** Enable or disable inbound TCP servers — bind fixed port, listen (default off). */
+  setAllowListen(allow: boolean): void {
+    symbols.cvisor_sandbox_set_allow_listen(this.ptr, allow ? 1 : 0);
+  }
+
+  /** Write a file into the sandbox overlay (visible to later runs of this sandbox). */
+  writeFile(path: string, data: Uint8Array | string): void {
+    const p = Buffer.from(path + "\0", "utf8");
+    const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : Buffer.from(data);
+    const rc = symbols.cvisor_sandbox_write_file(this.ptr, ptr(p), ptr(bytes), BigInt(bytes.length));
+    if (rc !== 0) throw new Error(`writeFile failed (errno ${-rc})`);
+  }
+
+  /** Read a file from the sandbox overlay (the guest's view). */
+  readFile(path: string): Uint8Array {
+    const p = Buffer.from(path + "\0", "utf8");
+    const len = new BigUint64Array(1);
+    const dataPtr = symbols.cvisor_sandbox_read_file(this.ptr, ptr(p), ptr(len));
+    const n = Number(len[0]);
+    if (!dataPtr || n === 0) return new Uint8Array(0);
+    const copy = new Uint8Array(toArrayBuffer(dataPtr, 0, n)).slice();
+    symbols.cvisor_bytes_free(dataPtr, BigInt(n));
+    return copy;
   }
 
   /** Run a command to completion; the returned Output's streams replay the

@@ -39,7 +39,16 @@ void           cvisor_bytes_free(uint8_t* ptr, size_t len);
 
 `cvisor_run_timeout` SIGKILLs the guest process group when `timeout_ms` elapses
 (0 = no limit); a timed-out run reports exit code 137 (128 + SIGKILL). With
-networking disabled the guest cannot open INET/INET6 sockets.
+networking disabled the guest cannot open INET/INET6 sockets;
+`cvisor_sandbox_set_allow_listen` opts into inbound TCP servers (bind a fixed
+port, `listen`, `accept`).
+
+Files can be transferred in and out of a sandbox's persistent overlay without a
+running guest — `cvisor_sandbox_write_file` / `cvisor_sandbox_read_file`. A file
+written this way is visible to a later `cvisor_run` of the same sandbox; reads
+return the guest's view (the overlay copy, else the real host file for cow
+paths). Each SDK wraps these as `write_file` / `read_file` (and
+`set_allow_listen`).
 
 For streaming output and interactive shells, the ABI also exposes **sessions**
 (`cvisor_session_*`): the guest runs in the background while the caller drains

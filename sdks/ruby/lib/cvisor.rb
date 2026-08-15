@@ -28,6 +28,9 @@ module Cvisor
     extern "void cvisor_sandbox_free(void*)"
     extern "void cvisor_sandbox_set_log_level(void*, int)"
     extern "void cvisor_sandbox_set_allow_network(void*, int)"
+    extern "void cvisor_sandbox_set_allow_listen(void*, int)"
+    extern "int cvisor_sandbox_write_file(void*, const char*, const char*, size_t)"
+    extern "void* cvisor_sandbox_read_file(void*, const char*, void*)"
     extern "void* cvisor_run(void*, const char*)"
     extern "void* cvisor_run_timeout(void*, const char*, unsigned long long)"
     extern "void cvisor_output_free(void*)"
@@ -89,6 +92,34 @@ module Cvisor
 
     def set_allow_network(allow)
       Native.cvisor_sandbox_set_allow_network(@ptr, allow ? 1 : 0)
+    end
+
+    # Allow (or deny) inbound TCP servers inside the sandbox (denied by default).
+    def set_allow_listen(allow)
+      Native.cvisor_sandbox_set_allow_listen(@ptr, allow ? 1 : 0)
+    end
+
+    # Seed a file into the sandbox's persistent overlay at an absolute `path`;
+    # visible to later #run calls of this same Sandbox. Raises on error.
+    def write_file(path, data)
+      bytes = data.b
+      rc = Native.cvisor_sandbox_write_file(@ptr, path, bytes, bytes.bytesize)
+      raise "write_file failed (errno #{-rc})" if rc != 0
+    end
+
+    # Read the guest's view of an absolute `path` as a binary String
+    # (overlay copy if present, else the real host file for cow paths).
+    def read_file(path)
+      len = Fiddle::Pointer.malloc(Fiddle::SIZEOF_SIZE_T, Fiddle::RUBY_FREE)
+      ptr = Native.cvisor_sandbox_read_file(@ptr, path, len)
+      n = len[0, Fiddle::SIZEOF_SIZE_T].unpack1(Fiddle::SIZEOF_SIZE_T == 8 ? "Q" : "L")
+      return "".b if ptr.null? || n.zero?
+
+      begin
+        ptr[0, n].b
+      ensure
+        Native.cvisor_bytes_free(ptr, n)
+      end
     end
 
     def run(command, timeout_ms: nil)

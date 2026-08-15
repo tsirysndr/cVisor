@@ -20,6 +20,12 @@ assert_eq(sb.run("true").exit_code, 0, "exit code true")
 assert_eq(sb.run("echo hi > /tmp/a.part && mv /tmp/a.part /tmp/a && grep hi /tmp/a").stdout, "hi\n", "atomic rename")
 assert_eq(sb.run("sleep 30", timeout_ms: 300).exit_code, 137, "timeout kill")
 
+sb.write_file("/tmp/data.txt", "seeded\n")
+assert_eq(sb.run("grep seeded /tmp/data.txt").stdout, "seeded\n", "write_file seeds overlay")
+sb.run("echo from-run > /tmp/out.txt")
+assert_eq(sb.read_file("/tmp/out.txt"), "from-run\n", "read_file sees run output")
+sb.set_allow_listen(true) # just confirm it doesn't raise
+
 chunks = []
 code = sb.run_streaming("for i in 1 2 3; do echo line$i; sleep 0.1; done",
                         on_stdout: ->(s) { chunks << s })

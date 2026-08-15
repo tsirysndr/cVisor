@@ -19,8 +19,8 @@ mod imp {
     use std::time::Duration;
 
     use cvisor_core::{
-        cleanup_overlay, execute_with, generate_uid, shell_argv, spawn_session, ExecOpts,
-        LogBuffer, LogLevel, PtyMode, Session,
+        cleanup_overlay, execute_with, generate_uid, read_file, shell_argv, spawn_session,
+        write_file, ExecOpts, LogBuffer, LogLevel, PtyMode, Session,
     };
     use napi::bindgen_prelude::{External, ExternalRef, Object, Uint8Array};
     use napi::Env;
@@ -32,6 +32,7 @@ mod imp {
         uid: [u8; 16],
         log_level: AtomicU8,
         allow_network: AtomicBool,
+        allow_listen: AtomicBool,
     }
 
     impl Sandbox {
@@ -61,12 +62,38 @@ mod imp {
             uid: generate_uid(),
             log_level: AtomicU8::new(0),
             allow_network: AtomicBool::new(true),
+            allow_listen: AtomicBool::new(false),
         })
     }
 
     #[napi(js_name = "sandboxSetAllowNetwork")]
     pub fn sandbox_set_allow_network(sandbox: ExternalRef<Sandbox>, allow: bool) {
         sandbox.allow_network.store(allow, Ordering::Relaxed);
+    }
+
+    #[napi(js_name = "sandboxSetAllowListen")]
+    pub fn sandbox_set_allow_listen(sandbox: ExternalRef<Sandbox>, allow: bool) {
+        sandbox.allow_listen.store(allow, Ordering::Relaxed);
+    }
+
+    #[napi(js_name = "sandboxWriteFile")]
+    pub fn sandbox_write_file(
+        sandbox: ExternalRef<Sandbox>,
+        path: String,
+        data: Uint8Array,
+    ) -> napi::Result<()> {
+        write_file(sandbox.uid, &path, &data)
+            .map_err(|e| napi::Error::from_reason(format!("write_file failed: {e}")))
+    }
+
+    #[napi(js_name = "sandboxReadFile")]
+    pub fn sandbox_read_file(
+        sandbox: ExternalRef<Sandbox>,
+        path: String,
+    ) -> napi::Result<Uint8Array> {
+        read_file(sandbox.uid, &path)
+            .map(Uint8Array::new)
+            .map_err(|e| napi::Error::from_reason(format!("read_file failed: {e}")))
     }
 
     #[napi(js_name = "sandboxSetLogLevel")]
@@ -95,6 +122,7 @@ mod imp {
         let stderr = Arc::new(LogBuffer::new());
         let opts = ExecOpts {
             allow_network: sandbox.allow_network.load(Ordering::Relaxed),
+            allow_listen: sandbox.allow_listen.load(Ordering::Relaxed),
             timeout: timeout_ms
                 .filter(|ms| *ms > 0)
                 .map(|ms| Duration::from_millis(ms as u64)),
@@ -141,6 +169,7 @@ mod imp {
     ) -> napi::Result<External<Session>> {
         let opts = ExecOpts {
             allow_network: sandbox.allow_network.load(Ordering::Relaxed),
+            allow_listen: sandbox.allow_listen.load(Ordering::Relaxed),
             ..ExecOpts::default()
         };
         let (argv, mode) = if pty {
@@ -149,8 +178,8 @@ mod imp {
                 PtyMode::Buffered,
             )
         } else {
-            let c = cmd
-                .ok_or_else(|| napi::Error::from_reason("cmd required for a non-pty session"))?;
+            let c =
+                cmd.ok_or_else(|| napi::Error::from_reason("cmd required for a non-pty session"))?;
             (shell_argv(&c), PtyMode::None)
         };
         spawn_session(sandbox.uid, sandbox.level(), &argv, opts, mode)

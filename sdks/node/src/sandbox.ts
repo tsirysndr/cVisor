@@ -67,6 +67,21 @@ export class Sandbox {
     native.sandboxSetAllowNetwork(this.ptr, allow);
   }
 
+  /** Enable or disable inbound TCP servers — bind fixed port, listen (default off). */
+  setAllowListen(allow: boolean) {
+    native.sandboxSetAllowListen(this.ptr, allow);
+  }
+
+  /** Write a file into the sandbox overlay (visible to later runs of this sandbox). */
+  writeFile(path: string, data: Uint8Array | string) {
+    native.sandboxWriteFile(this.ptr, path, typeof data === "string" ? new TextEncoder().encode(data) : data);
+  }
+
+  /** Read a file from the sandbox overlay (the guest's view). */
+  readFile(path: string): Uint8Array {
+    return native.sandboxReadFile(this.ptr, path);
+  }
+
   runCmd(command: string, options: RunOptions = {}): Output {
     const result = native.sandboxRunCmd(this.ptr, command, options.timeoutMs);
     return createOutput(

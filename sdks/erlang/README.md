@@ -53,6 +53,11 @@ PATH.
 6> %% (allowed by default).
 6> cvisor:set_allow_network(false).
 ok
+
+7> %% Allow inbound TCP servers (bind fixed port, listen, accept) for
+7> %% subsequent runs and sessions (denied by default).
+7> cvisor:set_allow_listen(true).
+ok
 ```
 
 `cvisor:run/1` accepts a binary or a string, blocks until the sandboxed
@@ -61,7 +66,9 @@ returns `{ok, Stdout, Stderr, ExitCode}` or `{error, Reason}`. The exit code
 follows shell convention: the guest's status, or 128+signo when killed by a
 signal. `cvisor:run/2` takes a timeout in milliseconds (0 = no limit).
 `cvisor:set_allow_network/1` takes a boolean and applies to sandboxes
-created by subsequent runs.
+created by subsequent runs. `cvisor:set_allow_listen/1` likewise takes a
+boolean and controls whether sandboxes may run inbound TCP servers (bind a
+fixed port, `listen`, `accept`); it is denied by default.
 
 From Elixir:
 
@@ -133,6 +140,36 @@ The lower-level session API, used by both helpers above:
 | `session_wait(S)`              | Block (on a dirty I/O scheduler) until exit; returns the code.     |
 | `session_kill(S)`              | SIGKILL the session's command.                                     |
 | `session_free(S)`              | Free the session and its sandbox (idempotent).                     |
+| `session_write_file(S, P, D)`  | Write bytes `D` to path `P` in the session's sandbox overlay.       |
+| `session_read_file(S, P)`      | Read path `P` from the session's overlay (`<<>>` if empty/missing). |
+
+### Seeding files into a session
+
+A session holds a single sandbox (one stable filesystem overlay) for its
+lifetime, so you can seed files into it and have them visible to commands run
+on that same session:
+
+```erlang
+{ok, S} = cvisor:shell([]),
+ok = cvisor:session_write_file(S, <<"/tmp/x">>, <<"hi">>),
+<<"hi">> = cvisor:session_read_file(S, <<"/tmp/x">>),
+cvisor:session_write(S, <<"cat /tmp/x\n">>),   %% the shell sees the file
+cvisor:session_write(S, <<"exit 0\n">>),
+cvisor:session_wait(S),
+cvisor:session_free(S).
+```
+
+`session_write_file/3` returns `ok` or `{error, Reason}` (an errno atom such as
+`eacces` or `enospc`); `session_read_file/2` returns the file's bytes, or `<<>>`
+for an empty or missing file.
+
+> Files are scoped to the sandbox they were written to. cVisor keys the
+> filesystem overlay by the sandbox's uid, and each top-level `run/1`,
+> `run/2`, and `run_streaming/2` call creates a *fresh* sandbox with a new
+> uid. There is therefore no way to seed a file that a later `run/1` will see
+> — file seeding is only meaningful **within a single session**, whose
+> sandbox (and uid) is stable across its runs. That is why these operations
+> are exposed on the session handle rather than as top-level functions.
 
 ## Requirements
 

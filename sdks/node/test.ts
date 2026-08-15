@@ -78,6 +78,17 @@ if (isInteractive) {
   assert(shellOut.includes("SHELL_OK") && shellOut.includes("IS_TTY"), "shell output");
   shell.close();
 
+  // File transfer in/out of the sandbox overlay.
+  const sbf = new Sandbox();
+  sbf.writeFile("/tmp/data.txt", "seeded\n");
+  await eq(sbf.runCmd("grep seeded /tmp/data.txt"), "seeded\n", "writeFile visible to run");
+  sbf.runCmd("echo from-run > /tmp/out.txt");
+  assert(
+    new TextDecoder().decode(sbf.readFile("/tmp/out.txt")) === "from-run\n",
+    "readFile round-trip",
+  );
+  sbf.setAllowListen(true);
+
   console.log("NODE_SDK_OK");
 
   const cmds = [

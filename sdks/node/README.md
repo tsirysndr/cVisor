@@ -59,6 +59,20 @@ sb.runCmd("sleep 60", { timeoutMs: 500 }).exitCode; // 137
 
 // Egress kill switch — deny outbound INET/INET6 sockets (default allowed):
 sb.setAllowNetwork(false);
+
+// Inbound TCP servers (bind fixed port, listen) — off by default:
+sb.setAllowListen(true);
+```
+
+### Files
+
+Transfer files in and out of the sandbox overlay; a file written this way is
+visible to later runs of the same sandbox:
+
+```ts
+sb.writeFile("/app/config.json", '{"k":1}');
+await sb.runCmd("cat /app/config.json").stdout();
+new TextDecoder().decode(sb.readFile("/tmp/result.txt"));
 ```
 
 Filesystem operations are virtualized (a copy-on-write overlay), and unsafe

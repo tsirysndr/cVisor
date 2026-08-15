@@ -62,6 +62,15 @@ def load_library(path: str | None = None) -> ctypes.CDLL:
     lib.cvisor_sandbox_set_allow_network.restype = None
     lib.cvisor_sandbox_set_allow_network.argtypes = [c_void_p, c_int]
 
+    lib.cvisor_sandbox_set_allow_listen.restype = None
+    lib.cvisor_sandbox_set_allow_listen.argtypes = [c_void_p, c_int]
+
+    lib.cvisor_sandbox_write_file.restype = c_int
+    lib.cvisor_sandbox_write_file.argtypes = [c_void_p, c_char_p, POINTER(c_uint8), c_size_t]
+
+    lib.cvisor_sandbox_read_file.restype = POINTER(c_uint8)
+    lib.cvisor_sandbox_read_file.argtypes = [c_void_p, c_char_p, POINTER(c_size_t)]
+
     lib.cvisor_run.restype = c_void_p
     lib.cvisor_run.argtypes = [c_void_p, c_char_p]
 
@@ -215,6 +224,44 @@ class Sandbox:
     def set_allow_network(self, allow: bool) -> None:
         """Allow (default) or deny outbound INET/INET6 networking."""
         self._lib.cvisor_sandbox_set_allow_network(self._ptr, 1 if allow else 0)
+
+    def set_allow_listen(self, allow: bool) -> None:
+        """Allow or deny (default) inbound TCP servers (listen/accept)."""
+        self._lib.cvisor_sandbox_set_allow_listen(self._ptr, 1 if allow else 0)
+
+    def write_file(self, path: str, data: bytes | str) -> None:
+        """Write ``data`` to ``path`` in the sandbox's persistent overlay.
+
+        ``path`` must be absolute; ``/proc`` and passthrough paths are not
+        writable. The file is visible to later ``run`` calls of this same
+        Sandbox instance. Raises ``OSError`` on failure."""
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        buf = (c_uint8 * len(data)).from_buffer_copy(data)
+        rc = self._lib.cvisor_sandbox_write_file(
+            self._ptr, path.encode("utf-8"), buf, len(data)
+        )
+        if rc != 0:
+            raise OSError(-rc, os.strerror(-rc), path)
+
+    def read_file(self, path: str) -> bytes:
+        """Read ``path`` as the guest sees it (overlay copy, else the real host
+        file for cow paths) and return its bytes.
+
+        ``path`` must be absolute. An empty file returns ``b""``; a missing or
+        unreadable path raises ``FileNotFoundError``."""
+        n = c_size_t(0)
+        ptr = self._lib.cvisor_sandbox_read_file(
+            self._ptr, path.encode("utf-8"), ctypes.byref(n)
+        )
+        if not ptr:
+            if n.value == 0:
+                return b""
+            raise FileNotFoundError(path)
+        try:
+            return bytes(ctypes.cast(ptr, POINTER(c_uint8 * n.value)).contents)
+        finally:
+            self._lib.cvisor_bytes_free(ptr, n.value)
 
     def run(self, command: str, timeout_ms: int | None = None) -> Output:
         """Run a shell command; if timeout_ms is set, SIGKILL the guest after

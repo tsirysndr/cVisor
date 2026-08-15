@@ -77,6 +77,24 @@ def test_run_streaming():
         assert "".join(chunks) == "line1\nline2\nline3\n"
 
 
+def test_file_io():
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        sb.write_file("/tmp/data.txt", "seeded\n")
+        assert sb.run("grep seeded /tmp/data.txt").stdout == "seeded\n"
+
+        sb.run("echo from-run > /tmp/out.txt")
+        assert sb.read_file("/tmp/out.txt") == b"from-run\n"
+
+
+def test_allow_listen():
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        sb.set_allow_listen(True)
+
+
 def test_shell_pty():
     from cvisor import Sandbox
 

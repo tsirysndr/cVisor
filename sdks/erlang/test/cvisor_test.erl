@@ -17,6 +17,7 @@ run() ->
         cvisor:run(<<"echo hi > /tmp/a.part && mv /tmp/a.part /tmp/a && grep hi /tmp/a">>),
     test_streaming(),
     test_shell(),
+    test_session_files(),
     io:format("ERLANG_SDK_OK~n").
 
 %% Stream a command that emits lines over time; collect the stdout chunks and
@@ -51,6 +52,23 @@ test_shell() ->
     Out = drain_all(S, <<>>),
     true = binary_contains(Out, <<"SHELL_OK">>),
     true = binary_contains(Out, <<"IS_TTY">>),
+    ok = cvisor:session_free(S),
+    ok.
+
+%% Seed a file into a session's sandbox with session_write_file, read it back
+%% with session_read_file, and confirm it is visible to a command run on the
+%% same PTY session. Also assert set_allow_listen/1 toggles cleanly.
+test_session_files() ->
+    ok = cvisor:set_allow_listen(true),
+    ok = cvisor:set_allow_listen(false),
+    {ok, S} = cvisor:shell([]),
+    ok = cvisor:session_write_file(S, <<"/tmp/x">>, <<"hi">>),
+    <<"hi">> = cvisor:session_read_file(S, <<"/tmp/x">>),
+    <<>> = cvisor:session_read_file(S, <<"/tmp/does-not-exist">>),
+    _ = cvisor:session_write(S, <<"cat /tmp/x; echo; exit 0\n">>),
+    0 = cvisor:session_wait(S),
+    Out = drain_all(S, <<>>),
+    true = binary_contains(Out, <<"hi">>),
     ok = cvisor:session_free(S),
     ok.
 

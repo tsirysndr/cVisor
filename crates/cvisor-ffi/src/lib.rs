@@ -9,6 +9,9 @@
 //!   void           cvisor_sandbox_free(CvisorSandbox*);
 //!   void           cvisor_sandbox_set_log_level(CvisorSandbox*, int level);      // 0=off 1=debug
 //!   void           cvisor_sandbox_set_allow_network(CvisorSandbox*, int allow);  // 0=deny else allow
+//!   void           cvisor_sandbox_set_allow_listen(CvisorSandbox*, int allow);   // 0=deny else allow inbound TCP servers
+//!   int            cvisor_sandbox_write_file(CvisorSandbox*, const char* path, const uint8_t*, size_t); // 0 ok, -errno
+//!   uint8_t*       cvisor_sandbox_read_file(CvisorSandbox*, const char* path, size_t* out_len);         // NULL on error
 //!   CvisorOutput*  cvisor_run(CvisorSandbox*, const char* cmd);                  // blocks
 //!   CvisorOutput*  cvisor_run_timeout(CvisorSandbox*, const char* cmd, uint64_t timeout_ms);
 //!   int            cvisor_output_exit_code(CvisorOutput*);                       // status, or 128+signo
@@ -46,8 +49,8 @@ mod imp {
     use std::time::Duration;
 
     use cvisor_core::{
-        cleanup_overlay, execute_with, generate_uid, shell_argv, spawn_session, ExecOpts,
-        LogBuffer, LogLevel, PtyMode, Session,
+        cleanup_overlay, execute_with, generate_uid, read_file, shell_argv, spawn_session,
+        write_file, ExecOpts, LogBuffer, LogLevel, PtyMode, Session,
     };
 
     /// Opaque sandbox handle.
@@ -55,6 +58,7 @@ mod imp {
         uid: [u8; 16],
         log_level: LogLevel,
         allow_network: bool,
+        allow_listen: bool,
     }
 
     /// Opaque result handle holding the fully-captured output of one run.
@@ -70,6 +74,7 @@ mod imp {
             uid: generate_uid(),
             log_level: LogLevel::Off,
             allow_network: true,
+            allow_listen: false,
         }))
     }
 
@@ -126,6 +131,7 @@ mod imp {
 
         let opts = ExecOpts {
             allow_network: sb.allow_network,
+            allow_listen: sb.allow_listen,
             timeout: (timeout_ms > 0).then(|| Duration::from_millis(timeout_ms)),
             ..ExecOpts::default()
         };
@@ -161,6 +167,75 @@ mod imp {
     pub unsafe extern "C" fn cvisor_sandbox_set_allow_network(sb: *mut Sandbox, allow: c_int) {
         if let Some(sb) = sb.as_mut() {
             sb.allow_network = allow != 0;
+        }
+    }
+
+    /// Enable (nonzero) or disable (0) inbound TCP servers (bind fixed port,
+    /// listen, accept). Default off.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_sandbox_set_allow_listen(sb: *mut Sandbox, allow: c_int) {
+        if let Some(sb) = sb.as_mut() {
+            sb.allow_listen = allow != 0;
+        }
+    }
+
+    /// Write `data` to `path` inside the sandbox overlay (visible to later runs).
+    /// Returns 0 on success or a negative errno.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_sandbox_write_file(
+        sb: *mut Sandbox,
+        path: *const c_char,
+        data: *const u8,
+        len: usize,
+    ) -> c_int {
+        let Some(sb) = sb.as_ref() else {
+            return -(cvisor_core::Errno::INVAL.code());
+        };
+        if path.is_null() || (data.is_null() && len != 0) {
+            return -(cvisor_core::Errno::INVAL.code());
+        }
+        // SAFETY: caller guarantees `path` is NUL-terminated and `data`/`len`
+        // describe a valid buffer.
+        let Ok(path) = CStr::from_ptr(path).to_str() else {
+            return -(cvisor_core::Errno::INVAL.code());
+        };
+        let bytes = if len == 0 {
+            &[][..]
+        } else {
+            std::slice::from_raw_parts(data, len)
+        };
+        match write_file(sb.uid, path, bytes) {
+            Ok(()) => 0,
+            Err(e) => -(e.errno().code()),
+        }
+    }
+
+    /// Read `path` from the sandbox overlay (the guest's view). Returns a freshly
+    /// allocated buffer the caller frees with `cvisor_bytes_free`, or NULL on
+    /// error. A successful read of an empty file also returns NULL with
+    /// `*out_len == 0`, so treat NULL with len 0 as "empty" when the file exists.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_sandbox_read_file(
+        sb: *mut Sandbox,
+        path: *const c_char,
+        out_len: *mut usize,
+    ) -> *mut u8 {
+        if let Some(l) = out_len.as_mut() {
+            *l = 0;
+        }
+        let Some(sb) = sb.as_ref() else {
+            return std::ptr::null_mut();
+        };
+        if path.is_null() {
+            return std::ptr::null_mut();
+        }
+        // SAFETY: caller guarantees `path` is a valid NUL-terminated C string.
+        let Ok(path) = CStr::from_ptr(path).to_str() else {
+            return std::ptr::null_mut();
+        };
+        match read_file(sb.uid, path) {
+            Ok(data) => copy_out(Some(&data), out_len),
+            Err(_) => std::ptr::null_mut(),
         }
     }
 
@@ -232,6 +307,7 @@ mod imp {
         };
         let opts = ExecOpts {
             allow_network: sb.allow_network,
+            allow_listen: sb.allow_listen,
             ..ExecOpts::default()
         };
         let (argv, mode) = if pty != 0 {

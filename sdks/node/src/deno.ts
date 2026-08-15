@@ -31,6 +31,18 @@ const lib = Deno.dlopen(libraryPath(), {
     parameters: ["pointer", "i32"],
     result: "void",
   },
+  cvisor_sandbox_set_allow_listen: {
+    parameters: ["pointer", "i32"],
+    result: "void",
+  },
+  cvisor_sandbox_write_file: {
+    parameters: ["pointer", "buffer", "buffer", "usize"],
+    result: "i32",
+  },
+  cvisor_sandbox_read_file: {
+    parameters: ["pointer", "buffer", "buffer"],
+    result: "pointer",
+  },
   cvisor_run: { parameters: ["pointer", "buffer"], result: "pointer" },
   cvisor_run_timeout: {
     parameters: ["pointer", "buffer", "u64"],
@@ -120,6 +132,33 @@ export class Sandbox {
   /** Enable or disable outbound INET/INET6 networking (default on). */
   setAllowNetwork(allow: boolean): void {
     lib.symbols.cvisor_sandbox_set_allow_network(this.#ptr, allow ? 1 : 0);
+  }
+
+  /** Enable or disable inbound TCP servers — bind fixed port, listen (default off). */
+  setAllowListen(allow: boolean): void {
+    lib.symbols.cvisor_sandbox_set_allow_listen(this.#ptr, allow ? 1 : 0);
+  }
+
+  /** Write a file into the sandbox overlay (visible to later runs of this sandbox). */
+  writeFile(path: string, data: Uint8Array | string): void {
+    const p = new TextEncoder().encode(path + "\0");
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+    const rc = lib.symbols.cvisor_sandbox_write_file(this.#ptr, p, bytes, BigInt(bytes.length));
+    if (rc !== 0) throw new Error(`writeFile failed (errno ${-rc})`);
+  }
+
+  /** Read a file from the sandbox overlay (the guest's view). */
+  readFile(path: string): Uint8Array {
+    const p = new TextEncoder().encode(path + "\0");
+    const lenBuf = new Uint8Array(8);
+    const dataPtr = lib.symbols.cvisor_sandbox_read_file(this.#ptr, p, lenBuf);
+    const n = Number(new DataView(lenBuf.buffer).getBigUint64(0, true));
+    if (dataPtr === null || n === 0) return new Uint8Array(0);
+    const view = new Deno.UnsafePointerView(dataPtr);
+    const copy = new Uint8Array(n);
+    view.copyInto(copy);
+    lib.symbols.cvisor_bytes_free(dataPtr, BigInt(n));
+    return copy;
   }
 
   /** Run a command to completion; the returned Output's streams replay the

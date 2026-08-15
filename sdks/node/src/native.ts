@@ -17,6 +17,19 @@ export interface NativeModule {
     sandbox: External<"Sandbox">,
     allow: boolean,
   ): void;
+  sandboxSetAllowListen(
+    sandbox: External<"Sandbox">,
+    allow: boolean,
+  ): void;
+  sandboxWriteFile(
+    sandbox: External<"Sandbox">,
+    path: string,
+    data: Uint8Array,
+  ): void;
+  sandboxReadFile(
+    sandbox: External<"Sandbox">,
+    path: string,
+  ): Uint8Array;
   sandboxRunCmd(
     sandbox: External<"Sandbox">,
     command: string,
