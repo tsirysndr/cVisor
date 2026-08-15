@@ -30,6 +30,30 @@ export interface NativeModule {
     sandbox: External<"Sandbox">,
     path: string,
   ): Uint8Array;
+  sandboxCopyInto(
+    sandbox: External<"Sandbox">,
+    hostPath: string,
+    guestPath: string,
+  ): void;
+  sandboxCopyOut(
+    sandbox: External<"Sandbox">,
+    guestPath: string,
+    hostPath: string,
+  ): void;
+  cacheSave(
+    sandbox: External<"Sandbox">,
+    sandboxPath: string,
+    key: string,
+    backend: string,
+    format: string,
+  ): void;
+  cacheRestore(
+    sandbox: External<"Sandbox">,
+    sandboxPath: string,
+    key: string,
+    backend: string,
+    format: string,
+  ): void;
   sandboxRunCmd(
     sandbox: External<"Sandbox">,
     command: string,

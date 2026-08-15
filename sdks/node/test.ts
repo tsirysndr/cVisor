@@ -89,6 +89,20 @@ if (isInteractive) {
   );
   sbf.setAllowListen(true);
 
+  // Cache: seed a dir, save, restore into a fresh sandbox, a run sees it.
+  const cacheKey = `k-${Date.now()}`;
+  const seed = new Sandbox();
+  seed.writeFile("/tmp/proj/a.txt", "alpha\n");
+  seed.writeFile("/tmp/proj/sub/b.txt", "beta\n");
+  seed.cacheSave("/tmp/proj", cacheKey);
+  const fresh = new Sandbox();
+  fresh.cacheRestore("/tmp/proj", cacheKey);
+  await eq(
+    fresh.runCmd("grep alpha /tmp/proj/a.txt && grep beta /tmp/proj/sub/b.txt"),
+    "alpha\nbeta\n",
+    "cache round-trip",
+  );
+
   console.log("NODE_SDK_OK");
 
   const cmds = [

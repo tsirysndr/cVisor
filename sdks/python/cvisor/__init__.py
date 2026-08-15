@@ -71,6 +71,18 @@ def load_library(path: str | None = None) -> ctypes.CDLL:
     lib.cvisor_sandbox_read_file.restype = POINTER(c_uint8)
     lib.cvisor_sandbox_read_file.argtypes = [c_void_p, c_char_p, POINTER(c_size_t)]
 
+    lib.cvisor_sandbox_copy_into.restype = c_int
+    lib.cvisor_sandbox_copy_into.argtypes = [c_void_p, c_char_p, c_char_p]
+
+    lib.cvisor_sandbox_copy_out.restype = c_int
+    lib.cvisor_sandbox_copy_out.argtypes = [c_void_p, c_char_p, c_char_p]
+
+    lib.cvisor_cache_save.restype = c_int
+    lib.cvisor_cache_save.argtypes = [c_void_p, c_char_p, c_char_p, c_char_p, c_char_p]
+
+    lib.cvisor_cache_restore.restype = c_int
+    lib.cvisor_cache_restore.argtypes = [c_void_p, c_char_p, c_char_p, c_char_p, c_char_p]
+
     lib.cvisor_run.restype = c_void_p
     lib.cvisor_run.argtypes = [c_void_p, c_char_p]
 
@@ -262,6 +274,79 @@ class Sandbox:
             return bytes(ctypes.cast(ptr, POINTER(c_uint8 * n.value)).contents)
         finally:
             self._lib.cvisor_bytes_free(ptr, n.value)
+
+    def copy_into(self, host_path: str, guest_path: str) -> None:
+        """Copy a host file or directory tree into the sandbox overlay.
+
+        ``host_path`` may be a single file or a directory; directories are
+        copied recursively and respect ``.gitignore``/``.dockerignore``. The
+        copied files land at ``guest_path`` in the sandbox's persistent overlay
+        and are visible to later ``run`` calls. Raises ``OSError`` on failure."""
+        rc = self._lib.cvisor_sandbox_copy_into(
+            self._ptr, host_path.encode("utf-8"), guest_path.encode("utf-8")
+        )
+        if rc != 0:
+            raise OSError(-rc, os.strerror(-rc), host_path)
+
+    def copy_out(self, guest_path: str, host_path: str) -> None:
+        """Copy a file or directory tree out of the sandbox overlay to the host.
+
+        ``guest_path`` is resolved as the guest sees it and written to
+        ``host_path`` on the real filesystem. Raises ``OSError`` on failure."""
+        rc = self._lib.cvisor_sandbox_copy_out(
+            self._ptr, guest_path.encode("utf-8"), host_path.encode("utf-8")
+        )
+        if rc != 0:
+            raise OSError(-rc, os.strerror(-rc), host_path)
+
+    def cache_save(
+        self, sandbox_path: str, key: str, backend: str = "", format: str = "gzip"
+    ) -> None:
+        """Archive a sandbox directory under ``key`` to a cache backend.
+
+        ``sandbox_path`` is a directory in the sandbox; its contents (respecting
+        ``.gitignore``/``.dockerignore``) are archived under ``key``.
+
+        ``backend`` selects where the archive is stored: ``""`` or ``"disk"``
+        (host disk, the default), ``"disk:/path"``, or
+        ``"s3://bucket/prefix?region=..&endpoint=.."``. S3 requires the library
+        to be built with the ``s3`` feature; the bundled ``libcvisor.so`` is not,
+        so ``disk`` is the working default.
+
+        ``format`` selects the archive format: ``""`` or ``"gzip"`` (the
+        default), ``"estargz"``, ``"none"`` (uncompressed), or ``"zstd"``
+        (only if the library is built with zstd; the bundled lib is not).
+
+        Raises ``OSError`` on failure."""
+        rc = self._lib.cvisor_cache_save(
+            self._ptr,
+            sandbox_path.encode("utf-8"),
+            key.encode("utf-8"),
+            backend.encode("utf-8"),
+            format.encode("utf-8"),
+        )
+        if rc != 0:
+            raise OSError(-rc, os.strerror(-rc), key)
+
+    def cache_restore(
+        self, sandbox_path: str, key: str, backend: str = "", format: str = "gzip"
+    ) -> None:
+        """Restore a cached archive stored under ``key`` back into the overlay.
+
+        Unpacks the archive saved by :meth:`cache_save` into ``sandbox_path`` in
+        the sandbox's persistent overlay, so its files are visible to later
+        ``run`` calls. ``backend`` and ``format`` must match what was used to
+        save (see :meth:`cache_save` for the accepted values and the disk-only
+        note for the bundled library). Raises ``OSError`` on failure."""
+        rc = self._lib.cvisor_cache_restore(
+            self._ptr,
+            sandbox_path.encode("utf-8"),
+            key.encode("utf-8"),
+            backend.encode("utf-8"),
+            format.encode("utf-8"),
+        )
+        if rc != 0:
+            raise OSError(-rc, os.strerror(-rc), key)
 
     def run(self, command: str, timeout_ms: int | None = None) -> Output:
         """Run a shell command; if timeout_ms is set, SIGKILL the guest after

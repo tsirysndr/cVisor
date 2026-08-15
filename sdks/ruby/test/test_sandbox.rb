@@ -26,6 +26,16 @@ sb.run("echo from-run > /tmp/out.txt")
 assert_eq(sb.read_file("/tmp/out.txt"), "from-run\n", "read_file sees run output")
 sb.set_allow_listen(true) # just confirm it doesn't raise
 
+# Cache round-trip: save a sandbox directory under a key, then restore it into
+# a fresh sandbox's overlay and confirm the files are visible to a run.
+sb.write_file("/tmp/proj/a.txt", "alpha\n")
+sb.write_file("/tmp/proj/b.txt", "beta\n")
+sb.cache_save("/tmp/proj", "k1")
+sb2 = Cvisor::Sandbox.new
+sb2.cache_restore("/tmp/proj", "k1")
+# grep (read-based) rather than cat (zero-copy sendfile bypasses capture).
+assert_eq(sb2.run("grep -h . /tmp/proj/a.txt /tmp/proj/b.txt").stdout, "alpha\nbeta\n", "cache round-trip")
+
 chunks = []
 code = sb.run_streaming("for i in 1 2 3; do echo line$i; sleep 0.1; done",
                         on_stdout: ->(s) { chunks << s })

@@ -63,6 +63,18 @@
     (is (= "from-run\n" (String. (cvisor/read-file sb "/tmp/out.txt") "UTF-8")))
     (cvisor/set-allow-listen! sb true)))
 
+(deftest cache-and-copy
+  ;; Seed a dir in one sandbox, cache it, restore into another, run sees it.
+  (let [key (str "k-" (System/nanoTime))]
+    (with-open [a (cvisor/sandbox)]
+      (cvisor/write-file a "/tmp/proj/a.txt" "alpha\n")
+      (cvisor/write-file a "/tmp/proj/sub/b.txt" "beta\n")
+      (cvisor/cache-save a "/tmp/proj" key))
+    (with-open [b (cvisor/sandbox)]
+      (cvisor/cache-restore b "/tmp/proj" key)
+      (is (= "alpha\nbeta\n"
+             (:stdout (cvisor/run b "grep alpha /tmp/proj/a.txt && grep beta /tmp/proj/sub/b.txt")))))))
+
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'cvisor.sandbox-test)]
     (if (zero? (+ fail error))

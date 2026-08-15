@@ -27,6 +27,10 @@ typedef void (*fn_set_allow_network)(void *, int);
 typedef void (*fn_set_allow_listen)(void *, int);
 typedef int (*fn_write_file)(void *, const char *, const uint8_t *, size_t);
 typedef uint8_t *(*fn_read_file)(void *, const char *, size_t *);
+typedef int (*fn_copy_into)(void *, const char *, const char *);
+typedef int (*fn_copy_out)(void *, const char *, const char *);
+typedef int (*fn_cache)(void *, const char *, const char *, const char *,
+                        const char *);
 
 typedef void *(*fn_session_start)(void *, const char *, int);
 typedef uint8_t *(*fn_session_read)(void *, size_t *);
@@ -50,6 +54,10 @@ static fn_set_allow_network p_set_allow_network;
 static fn_set_allow_listen p_set_allow_listen;
 static fn_write_file p_write_file;
 static fn_read_file p_read_file;
+static fn_copy_into p_copy_into;
+static fn_copy_out p_copy_out;
+static fn_cache p_cache_save;
+static fn_cache p_cache_restore;
 
 static fn_session_start p_session_start;
 static fn_session_read p_session_read_stdout;
@@ -97,6 +105,10 @@ static int load_lib(void) {
         (fn_set_allow_listen)dlsym(g_lib, "cvisor_sandbox_set_allow_listen");
     p_write_file = (fn_write_file)dlsym(g_lib, "cvisor_sandbox_write_file");
     p_read_file = (fn_read_file)dlsym(g_lib, "cvisor_sandbox_read_file");
+    p_copy_into = (fn_copy_into)dlsym(g_lib, "cvisor_sandbox_copy_into");
+    p_copy_out = (fn_copy_out)dlsym(g_lib, "cvisor_sandbox_copy_out");
+    p_cache_save = (fn_cache)dlsym(g_lib, "cvisor_cache_save");
+    p_cache_restore = (fn_cache)dlsym(g_lib, "cvisor_cache_restore");
 
     p_session_start = (fn_session_start)dlsym(g_lib, "cvisor_session_start");
     p_session_read_stdout =
@@ -115,6 +127,7 @@ static int load_lib(void) {
     return p_new && p_free && p_run_timeout && p_out_free && p_stdout &&
            p_stderr && p_exit_code && p_bytes_free && p_set_allow_network &&
            p_set_allow_listen && p_write_file && p_read_file &&
+           p_copy_into && p_copy_out && p_cache_save && p_cache_restore &&
            p_session_start && p_session_read_stdout && p_session_read_stderr &&
            p_session_write_stdin && p_session_resize && p_session_try_wait &&
            p_session_wait && p_session_kill && p_session_free;
@@ -482,6 +495,155 @@ static ERL_NIF_TERM session_read_file_nif(ErlNifEnv *env, int argc,
     return enif_make_binary(env, &bin);
 }
 
+/* Copy a binary into a freshly allocated NUL-terminated C string, or NULL on
+ * allocation failure. Free with enif_free. */
+static char *bin_to_cstr(ErlNifBinary *bin) {
+    char *s = enif_alloc(bin->size + 1);
+    if (!s) {
+        return NULL;
+    }
+    memcpy(s, bin->data, bin->size);
+    s[bin->size] = '\0';
+    return s;
+}
+
+/* Map a 0 (ok) / nonzero (-errno) C return into ok | {error, Atom}. */
+static ERL_NIF_TERM rc_result(ErlNifEnv *env, int rc) {
+    if (rc == 0) {
+        return enif_make_atom(env, "ok");
+    }
+    return enif_make_tuple2(env, enif_make_atom(env, "error"),
+                            errno_atom(env, rc < 0 ? -rc : rc));
+}
+
+/* Copy a host file or directory tree into the session's sandbox overlay,
+ * visible to later runs on the SAME session (same sandbox/uid). */
+static ERL_NIF_TERM session_copy_into_nif(ErlNifEnv *env, int argc,
+                                          const ERL_NIF_TERM argv[]) {
+    session_t *s;
+    ErlNifBinary host_bin, guest_bin;
+    if (argc != 3 || !get_session(env, argv[0], &s) ||
+        !enif_inspect_binary(env, argv[1], &host_bin) ||
+        !enif_inspect_binary(env, argv[2], &guest_bin)) {
+        return enif_make_badarg(env);
+    }
+    if (s->freed) {
+        return enif_make_badarg(env);
+    }
+
+    char *host = bin_to_cstr(&host_bin);
+    char *guest = bin_to_cstr(&guest_bin);
+    if (!host || !guest) {
+        enif_free(host);
+        enif_free(guest);
+        return enif_raise_exception(env, enif_make_atom(env, "enomem"));
+    }
+    int rc = p_copy_into(s->sb, host, guest);
+    enif_free(host);
+    enif_free(guest);
+    return rc_result(env, rc);
+}
+
+/* Copy a file or directory tree out of the session's sandbox overlay to a
+ * host path. */
+static ERL_NIF_TERM session_copy_out_nif(ErlNifEnv *env, int argc,
+                                         const ERL_NIF_TERM argv[]) {
+    session_t *s;
+    ErlNifBinary guest_bin, host_bin;
+    if (argc != 3 || !get_session(env, argv[0], &s) ||
+        !enif_inspect_binary(env, argv[1], &guest_bin) ||
+        !enif_inspect_binary(env, argv[2], &host_bin)) {
+        return enif_make_badarg(env);
+    }
+    if (s->freed) {
+        return enif_make_badarg(env);
+    }
+
+    char *guest = bin_to_cstr(&guest_bin);
+    char *host = bin_to_cstr(&host_bin);
+    if (!guest || !host) {
+        enif_free(guest);
+        enif_free(host);
+        return enif_raise_exception(env, enif_make_atom(env, "enomem"));
+    }
+    int rc = p_copy_out(s->sb, guest, host);
+    enif_free(guest);
+    enif_free(host);
+    return rc_result(env, rc);
+}
+
+/* Save a path in the session's sandbox overlay to the cache under Key, using
+ * the given backend ("" = disk) and format ("gzip"/"estargz"/"none"). */
+static ERL_NIF_TERM session_cache_save_nif(ErlNifEnv *env, int argc,
+                                           const ERL_NIF_TERM argv[]) {
+    session_t *s;
+    ErlNifBinary path_bin, key_bin, backend_bin, format_bin;
+    if (argc != 5 || !get_session(env, argv[0], &s) ||
+        !enif_inspect_binary(env, argv[1], &path_bin) ||
+        !enif_inspect_binary(env, argv[2], &key_bin) ||
+        !enif_inspect_binary(env, argv[3], &backend_bin) ||
+        !enif_inspect_binary(env, argv[4], &format_bin)) {
+        return enif_make_badarg(env);
+    }
+    if (s->freed) {
+        return enif_make_badarg(env);
+    }
+
+    char *path = bin_to_cstr(&path_bin);
+    char *key = bin_to_cstr(&key_bin);
+    char *backend = bin_to_cstr(&backend_bin);
+    char *format = bin_to_cstr(&format_bin);
+    if (!path || !key || !backend || !format) {
+        enif_free(path);
+        enif_free(key);
+        enif_free(backend);
+        enif_free(format);
+        return enif_raise_exception(env, enif_make_atom(env, "enomem"));
+    }
+    int rc = p_cache_save(s->sb, path, key, backend, format);
+    enif_free(path);
+    enif_free(key);
+    enif_free(backend);
+    enif_free(format);
+    return rc_result(env, rc);
+}
+
+/* Restore a cached entry (saved under Key) into a path in the session's
+ * sandbox overlay, using the given backend and format. */
+static ERL_NIF_TERM session_cache_restore_nif(ErlNifEnv *env, int argc,
+                                              const ERL_NIF_TERM argv[]) {
+    session_t *s;
+    ErlNifBinary path_bin, key_bin, backend_bin, format_bin;
+    if (argc != 5 || !get_session(env, argv[0], &s) ||
+        !enif_inspect_binary(env, argv[1], &path_bin) ||
+        !enif_inspect_binary(env, argv[2], &key_bin) ||
+        !enif_inspect_binary(env, argv[3], &backend_bin) ||
+        !enif_inspect_binary(env, argv[4], &format_bin)) {
+        return enif_make_badarg(env);
+    }
+    if (s->freed) {
+        return enif_make_badarg(env);
+    }
+
+    char *path = bin_to_cstr(&path_bin);
+    char *key = bin_to_cstr(&key_bin);
+    char *backend = bin_to_cstr(&backend_bin);
+    char *format = bin_to_cstr(&format_bin);
+    if (!path || !key || !backend || !format) {
+        enif_free(path);
+        enif_free(key);
+        enif_free(backend);
+        enif_free(format);
+        return enif_raise_exception(env, enif_make_atom(env, "enomem"));
+    }
+    int rc = p_cache_restore(s->sb, path, key, backend, format);
+    enif_free(path);
+    enif_free(key);
+    enif_free(backend);
+    enif_free(format);
+    return rc_result(env, rc);
+}
+
 static int on_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
     (void)priv_data;
     (void)load_info;
@@ -510,6 +672,15 @@ static ErlNifFunc nif_funcs[] = {
     {"session_free_nif", 1, session_free_nif, 0},
     {"session_write_file_nif", 3, session_write_file_nif, 0},
     {"session_read_file_nif", 2, session_read_file_nif, 0},
+    /* Marked dirty (I/O bound): copy/cache walk trees and touch disk. */
+    {"session_copy_into_nif", 3, session_copy_into_nif,
+     ERL_NIF_DIRTY_JOB_IO_BOUND},
+    {"session_copy_out_nif", 3, session_copy_out_nif,
+     ERL_NIF_DIRTY_JOB_IO_BOUND},
+    {"session_cache_save_nif", 5, session_cache_save_nif,
+     ERL_NIF_DIRTY_JOB_IO_BOUND},
+    {"session_cache_restore_nif", 5, session_cache_restore_nif,
+     ERL_NIF_DIRTY_JOB_IO_BOUND},
 };
 
 ERL_NIF_INIT(cvisor, nif_funcs, on_load, NULL, NULL, NULL)

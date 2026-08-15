@@ -73,6 +73,23 @@ visible to later runs of the same sandbox:
 sb.writeFile("/app/config.json", '{"k":1}');
 await sb.runCmd("cat /app/config.json").stdout();
 new TextDecoder().decode(sb.readFile("/tmp/result.txt"));
+
+// Recursive directory copy (respects .gitignore / .dockerignore):
+sb.copyInto("./src", "/app");
+sb.copyOut("/app/dist", "./dist");
+```
+
+### Cache
+
+Back up and restore a sandbox directory, keyed — for build caches, deps, etc.
+The bundled native library uses the host disk with gzip/estargz/none; S3 and
+zstd need a library built with those features.
+
+```ts
+sb.cacheSave("/app/node_modules", "deps-v1");
+// ...later, in another sandbox — exact key or newest matching prefix:
+sb.cacheRestore("/app/node_modules", "deps-v1");
+// options: { backend: "s3://bucket/prefix", format: "estargz" }
 ```
 
 Filesystem operations are virtualized (a copy-on-write overlay), and unsafe

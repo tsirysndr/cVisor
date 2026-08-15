@@ -19,12 +19,14 @@ mod imp {
     use std::time::Duration;
 
     use cvisor_core::{
-        cleanup_overlay, execute_with, generate_uid, read_file, shell_argv, spawn_session,
-        write_file, ExecOpts, LogBuffer, LogLevel, PtyMode, Session,
+        cache, cleanup_overlay, copy_into, copy_out_of, execute_with, generate_uid, read_file,
+        shell_argv, spawn_session, write_file, ExecOpts, Format, LogBuffer, LogLevel, PtyMode,
+        Session,
     };
     use napi::bindgen_prelude::{External, ExternalRef, Object, Uint8Array};
     use napi::Env;
     use napi_derive::napi;
+    use std::path::Path;
 
     /// A sandbox handle. Cleanup of the overlay tree happens when the JS handle
     /// is garbage-collected (Drop), matching the original finalizer behavior.
@@ -94,6 +96,72 @@ mod imp {
         read_file(sandbox.uid, &path)
             .map(Uint8Array::new)
             .map_err(|e| napi::Error::from_reason(format!("read_file failed: {e}")))
+    }
+
+    #[napi(js_name = "sandboxCopyInto")]
+    pub fn sandbox_copy_into(
+        sandbox: ExternalRef<Sandbox>,
+        host_path: String,
+        guest_path: String,
+    ) -> napi::Result<()> {
+        copy_into(sandbox.uid, Path::new(&host_path), &guest_path)
+            .map_err(|e| napi::Error::from_reason(format!("copy_into failed: {e}")))
+    }
+
+    #[napi(js_name = "sandboxCopyOut")]
+    pub fn sandbox_copy_out(
+        sandbox: ExternalRef<Sandbox>,
+        guest_path: String,
+        host_path: String,
+    ) -> napi::Result<()> {
+        copy_out_of(sandbox.uid, &guest_path, Path::new(&host_path))
+            .map_err(|e| napi::Error::from_reason(format!("copy_out failed: {e}")))
+    }
+
+    #[napi(js_name = "cacheSave")]
+    pub fn cache_save(
+        sandbox: ExternalRef<Sandbox>,
+        sandbox_path: String,
+        key: String,
+        backend: String,
+        format: String,
+    ) -> napi::Result<()> {
+        cache_op(&sandbox, &sandbox_path, &key, &backend, &format, false)
+    }
+
+    #[napi(js_name = "cacheRestore")]
+    pub fn cache_restore(
+        sandbox: ExternalRef<Sandbox>,
+        sandbox_path: String,
+        key: String,
+        backend: String,
+        format: String,
+    ) -> napi::Result<()> {
+        cache_op(&sandbox, &sandbox_path, &key, &backend, &format, true)
+    }
+
+    fn cache_op(
+        sandbox: &Sandbox,
+        sandbox_path: &str,
+        key: &str,
+        backend: &str,
+        format: &str,
+        restore: bool,
+    ) -> napi::Result<()> {
+        let fmt = if format.is_empty() {
+            Format::Gzip
+        } else {
+            Format::parse(format)
+                .ok_or_else(|| napi::Error::from_reason(format!("unknown format: {format}")))?
+        };
+        let backend = cache::Backend::parse(backend)
+            .map_err(|e| napi::Error::from_reason(format!("bad backend: {e}")))?;
+        let res = if restore {
+            cache::restore(sandbox.uid, sandbox_path, key, &backend, fmt)
+        } else {
+            cache::save(sandbox.uid, sandbox_path, key, &backend, fmt)
+        };
+        res.map_err(|e| napi::Error::from_reason(format!("cache failed: {e}")))
     }
 
     #[napi(js_name = "sandboxSetLogLevel")]

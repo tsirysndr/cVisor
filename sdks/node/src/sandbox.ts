@@ -1,6 +1,6 @@
 import { External } from "./napi";
 import { native } from "./native";
-import { buildCommand, createOutput, Output, RunOptions } from "./output";
+import { buildCommand, CacheOptions, createOutput, Output, RunOptions } from "./output";
 import {
   makeShell,
   runStreaming as runStreamingImpl,
@@ -10,7 +10,7 @@ import {
   StreamOptions,
 } from "./session";
 
-export type { Output, RunOptions } from "./output";
+export type { Output, RunOptions, CacheOptions } from "./output";
 export type { Shell, ShellOptions, StreamOptions } from "./session";
 
 /** Bind a napi session handle to the runtime-agnostic SessionNative shape. */
@@ -80,6 +80,26 @@ export class Sandbox {
   /** Read a file from the sandbox overlay (the guest's view). */
   readFile(path: string): Uint8Array {
     return native.sandboxReadFile(this.ptr, path);
+  }
+
+  /** Copy a host file or directory tree into the sandbox (recursive, ignore-aware). */
+  copyInto(hostPath: string, guestPath: string) {
+    native.sandboxCopyInto(this.ptr, hostPath, guestPath);
+  }
+
+  /** Copy a sandbox file or directory tree out to the host. */
+  copyOut(guestPath: string, hostPath: string) {
+    native.sandboxCopyOut(this.ptr, guestPath, hostPath);
+  }
+
+  /** Archive a sandbox directory to the cache under `key`. */
+  cacheSave(sandboxPath: string, key: string, options: CacheOptions = {}) {
+    native.cacheSave(this.ptr, sandboxPath, key, options.backend ?? "", options.format ?? "gzip");
+  }
+
+  /** Restore a cached archive (`key`, or its prefix) into a sandbox directory. */
+  cacheRestore(sandboxPath: string, key: string, options: CacheOptions = {}) {
+    native.cacheRestore(this.ptr, sandboxPath, key, options.backend ?? "", options.format ?? "gzip");
   }
 
   runCmd(command: string, options: RunOptions = {}): Output {

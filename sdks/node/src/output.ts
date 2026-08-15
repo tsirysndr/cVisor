@@ -27,6 +27,14 @@ export interface RunOptions {
   timeoutMs?: number;
 }
 
+/** Options for cache save/restore. */
+export interface CacheOptions {
+  /** "" / "disk" (default), "disk:/path", or "s3://bucket/prefix?...". */
+  backend?: string;
+  /** "gzip" (default), "estargz", "none", or "zstd". */
+  format?: string;
+}
+
 /** Wrap an already-materialized buffer as a single-chunk stream, so the FFI
  * backends (which run a command to completion) share the napi Output shape. */
 export function bytesToStream(bytes: Uint8Array): ReadableStream<Uint8Array> {

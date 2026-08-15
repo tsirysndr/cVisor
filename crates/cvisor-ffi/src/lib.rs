@@ -12,6 +12,10 @@
 //!   void           cvisor_sandbox_set_allow_listen(CvisorSandbox*, int allow);   // 0=deny else allow inbound TCP servers
 //!   int            cvisor_sandbox_write_file(CvisorSandbox*, const char* path, const uint8_t*, size_t); // 0 ok, -errno
 //!   uint8_t*       cvisor_sandbox_read_file(CvisorSandbox*, const char* path, size_t* out_len);         // NULL on error
+//!   int            cvisor_sandbox_copy_into(CvisorSandbox*, const char* host, const char* guest);       // file/dir, 0 ok, -errno
+//!   int            cvisor_sandbox_copy_out(CvisorSandbox*, const char* guest, const char* host);
+//!   int            cvisor_cache_save(CvisorSandbox*, const char* path, const char* key, const char* backend, const char* format);
+//!   int            cvisor_cache_restore(CvisorSandbox*, const char* path, const char* key, const char* backend, const char* format);
 //!   CvisorOutput*  cvisor_run(CvisorSandbox*, const char* cmd);                  // blocks
 //!   CvisorOutput*  cvisor_run_timeout(CvisorSandbox*, const char* cmd, uint64_t timeout_ms);
 //!   int            cvisor_output_exit_code(CvisorOutput*);                       // status, or 128+signo
@@ -49,8 +53,9 @@ mod imp {
     use std::time::Duration;
 
     use cvisor_core::{
-        cleanup_overlay, execute_with, generate_uid, read_file, shell_argv, spawn_session,
-        write_file, ExecOpts, LogBuffer, LogLevel, PtyMode, Session,
+        cache, cleanup_overlay, copy_into, copy_out_of, execute_with, generate_uid, read_file,
+        shell_argv, spawn_session, write_file, ExecOpts, Format, LogBuffer, LogLevel, PtyMode,
+        Session,
     };
 
     /// Opaque sandbox handle.
@@ -236,6 +241,130 @@ mod imp {
         match read_file(sb.uid, path) {
             Ok(data) => copy_out(Some(&data), out_len),
             Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    /// Copy a host file or directory tree into the sandbox at `guest_path`
+    /// (recursive, ignore-aware). Returns 0 or a negative errno.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_sandbox_copy_into(
+        sb: *mut Sandbox,
+        host_path: *const c_char,
+        guest_path: *const c_char,
+    ) -> c_int {
+        with_two_paths(sb, host_path, guest_path, |uid, host, guest| {
+            copy_into(uid, std::path::Path::new(host), guest)
+        })
+    }
+
+    /// Copy a sandbox file or directory tree out to `host_path`. Returns 0 or a
+    /// negative errno.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_sandbox_copy_out(
+        sb: *mut Sandbox,
+        guest_path: *const c_char,
+        host_path: *const c_char,
+    ) -> c_int {
+        with_two_paths(sb, guest_path, host_path, |uid, guest, host| {
+            copy_out_of(uid, guest, std::path::Path::new(host))
+        })
+    }
+
+    unsafe fn with_two_paths(
+        sb: *mut Sandbox,
+        a: *const c_char,
+        b: *const c_char,
+        f: impl FnOnce([u8; 16], &str, &str) -> cvisor_core::SysResult<()>,
+    ) -> c_int {
+        let Some(sb) = sb.as_ref() else {
+            return -(cvisor_core::Errno::INVAL.code());
+        };
+        if a.is_null() || b.is_null() {
+            return -(cvisor_core::Errno::INVAL.code());
+        }
+        let (Ok(a), Ok(b)) = (CStr::from_ptr(a).to_str(), CStr::from_ptr(b).to_str()) else {
+            return -(cvisor_core::Errno::INVAL.code());
+        };
+        match f(sb.uid, a, b) {
+            Ok(()) => 0,
+            Err(e) => -(e.errno().code()),
+        }
+    }
+
+    /// Back up the sandbox directory `sandbox_path` to `backend` (empty = disk)
+    /// under `key`, in `format` (empty = gzip). Returns 0 or a negative errno.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_cache_save(
+        sb: *mut Sandbox,
+        sandbox_path: *const c_char,
+        key: *const c_char,
+        backend: *const c_char,
+        format: *const c_char,
+    ) -> c_int {
+        cache_op(sb, sandbox_path, key, backend, format, false)
+    }
+
+    /// Restore the archive `key` from `backend` into the sandbox directory
+    /// `sandbox_path`. Returns 0 or a negative errno.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_cache_restore(
+        sb: *mut Sandbox,
+        sandbox_path: *const c_char,
+        key: *const c_char,
+        backend: *const c_char,
+        format: *const c_char,
+    ) -> c_int {
+        cache_op(sb, sandbox_path, key, backend, format, true)
+    }
+
+    unsafe fn cache_op(
+        sb: *mut Sandbox,
+        sandbox_path: *const c_char,
+        key: *const c_char,
+        backend: *const c_char,
+        format: *const c_char,
+        restore: bool,
+    ) -> c_int {
+        let inval = -(cvisor_core::Errno::INVAL.code());
+        let Some(sb) = sb.as_ref() else { return inval };
+        if sandbox_path.is_null() || key.is_null() {
+            return inval;
+        }
+        let cstr = |p: *const c_char| -> Option<&str> {
+            if p.is_null() {
+                Some("")
+            } else {
+                CStr::from_ptr(p).to_str().ok()
+            }
+        };
+        let (Some(path), Some(key), Some(backend), Some(fmt)) = (
+            CStr::from_ptr(sandbox_path).to_str().ok(),
+            CStr::from_ptr(key).to_str().ok(),
+            cstr(backend),
+            cstr(format),
+        ) else {
+            return inval;
+        };
+        let format = if fmt.is_empty() {
+            Format::Gzip
+        } else {
+            match Format::parse(fmt) {
+                Some(f) => f,
+                None => return inval,
+            }
+        };
+        let backend = match cache::Backend::parse(backend) {
+            Ok(b) => b,
+            Err(e) => return -(e.errno().code()),
+        };
+        let res = if restore {
+            cache::restore(sb.uid, path, key, &backend, format)
+        } else {
+            cache::save(sb.uid, path, key, &backend, format)
+        };
+        match res {
+            Ok(()) => 0,
+            Err(e) => -(e.errno().code()),
         }
     }
 

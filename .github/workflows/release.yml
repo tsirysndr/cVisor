@@ -37,11 +37,20 @@ jobs:
         with:
           key: release-${{ matrix.arch }}
 
-      # Each runner is native for its arch, so this is not cross-compilation.
-      # The musl targets link statically via rust-lld (see .cargo/config.toml),
-      # producing a self-contained binary that runs on any Linux of that arch.
-      - name: Build cvisor (static musl)
-        run: cargo build -p cvisor-core --bin cvisor --target ${{ matrix.target }} --release
+      # The full-featured build pulls in C dependencies (zstd, and ring via the
+      # s3 backend's TLS), so it needs a musl C toolchain. Each runner is native
+      # for its arch, so musl-gcc here is the native musl compiler — not a cross
+      # toolchain.
+      - name: Install musl C toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      # Static musl binary (rust-lld links, see .cargo/config.toml), built with
+      # all optional features (zstd + s3) enabled.
+      - name: Build cvisor (static musl, all features)
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
+        run: cargo build -p cvisor-core --bin cvisor --target ${{ matrix.target }} --release --features zstd,s3
 
       - name: Stage artifact
         run: |

@@ -6,6 +6,7 @@ cvisor/_native/ for packaging). Linux-only — skips elsewhere.
 
 import os
 import platform
+import tempfile
 import time
 
 import pytest
@@ -86,6 +87,42 @@ def test_file_io():
 
         sb.run("echo from-run > /tmp/out.txt")
         assert sb.read_file("/tmp/out.txt") == b"from-run\n"
+
+
+def test_cache_roundtrip_across_sandboxes():
+    from cvisor import Sandbox
+
+    with Sandbox() as sb:
+        sb.write_file("/tmp/proj/a.txt", "alpha\n")
+        sb.write_file("/tmp/proj/b.txt", "beta\n")
+        sb.cache_save("/tmp/proj", "k1")
+
+    with Sandbox() as sb2:
+        sb2.cache_restore("/tmp/proj", "k1")
+        assert sb2.run("grep alpha /tmp/proj/a.txt").stdout == "alpha\n"
+        assert sb2.run("grep beta /tmp/proj/b.txt").stdout == "beta\n"
+
+
+def test_copy_into_copy_out_dir():
+    from cvisor import Sandbox
+
+    with tempfile.TemporaryDirectory() as src:
+        with open(os.path.join(src, "one.txt"), "w") as f:
+            f.write("one\n")
+        with open(os.path.join(src, "two.txt"), "w") as f:
+            f.write("two\n")
+
+        with Sandbox() as sb:
+            sb.copy_into(src, "/tmp/incoming")
+            assert sb.run("grep one /tmp/incoming/one.txt").stdout == "one\n"
+            assert sb.run("grep two /tmp/incoming/two.txt").stdout == "two\n"
+
+            sb.run("echo three > /tmp/incoming/three.txt")
+            with tempfile.TemporaryDirectory() as dst:
+                out_dir = os.path.join(dst, "out")
+                sb.copy_out("/tmp/incoming", out_dir)
+                with open(os.path.join(out_dir, "three.txt")) as f:
+                    assert f.read() == "three\n"
 
 
 def test_allow_listen():

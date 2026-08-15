@@ -18,6 +18,7 @@ run() ->
     test_streaming(),
     test_shell(),
     test_session_files(),
+    test_cache(),
     io:format("ERLANG_SDK_OK~n").
 
 %% Stream a command that emits lines over time; collect the stdout chunks and
@@ -69,6 +70,23 @@ test_session_files() ->
     0 = cvisor:session_wait(S),
     Out = drain_all(S, <<>>),
     true = binary_contains(Out, <<"hi">>),
+    ok = cvisor:session_free(S),
+    ok.
+
+%% On a single session: write a file into /tmp/proj, save that directory to the
+%% cache under a key, restore it into a different directory (/tmp/proj2), and
+%% confirm a command run on the same session sees the restored file. Exercises
+%% the default disk backend and gzip format.
+test_cache() ->
+    {ok, S} = cvisor:shell([]),
+    ok = cvisor:session_write_file(S, <<"/tmp/proj/data.txt">>, <<"cached-payload">>),
+    ok = cvisor:session_cache_save(S, <<"/tmp/proj">>, <<"k1">>, <<>>, <<"gzip">>),
+    ok = cvisor:session_cache_restore(S, <<"/tmp/proj2">>, <<"k1">>, <<>>, <<"gzip">>),
+    <<"cached-payload">> = cvisor:session_read_file(S, <<"/tmp/proj2/data.txt">>),
+    _ = cvisor:session_write(S, <<"cat /tmp/proj2/data.txt; echo; exit 0\n">>),
+    0 = cvisor:session_wait(S),
+    Out = drain_all(S, <<>>),
+    true = binary_contains(Out, <<"cached-payload">>),
     ok = cvisor:session_free(S),
     ok.
 

@@ -39,6 +39,11 @@ module Cvisor
     extern "void* cvisor_output_stderr(void*, void*)"
     extern "void cvisor_bytes_free(void*, size_t)"
 
+    extern "int cvisor_sandbox_copy_into(void*, const char*, const char*)"
+    extern "int cvisor_sandbox_copy_out(void*, const char*, const char*)"
+    extern "int cvisor_cache_save(void*, const char*, const char*, const char*, const char*)"
+    extern "int cvisor_cache_restore(void*, const char*, const char*, const char*, const char*)"
+
     extern "void* cvisor_session_start(void*, const char*, int)"
     extern "void* cvisor_session_read_stdout(void*, void*)"
     extern "void* cvisor_session_read_stderr(void*, void*)"
@@ -120,6 +125,39 @@ module Cvisor
       ensure
         Native.cvisor_bytes_free(ptr, n)
       end
+    end
+
+    # Copy a host file or directory tree into the sandbox overlay at
+    # `guest_path`; visible to later #run calls. Directory copies are recursive
+    # and honor .gitignore/.dockerignore. Raises on error.
+    def copy_into(host_path, guest_path)
+      rc = Native.cvisor_sandbox_copy_into(@ptr, host_path, guest_path)
+      raise "copy_into failed (errno #{-rc})" if rc != 0
+    end
+
+    # Copy the guest's view of `guest_path` (file or directory) out to
+    # `host_path` on the host filesystem. Raises on error.
+    def copy_out(guest_path, host_path)
+      rc = Native.cvisor_sandbox_copy_out(@ptr, guest_path, host_path)
+      raise "copy_out failed (errno #{-rc})" if rc != 0
+    end
+
+    # Archive the sandbox directory `sandbox_path` under `key` in a cache
+    # backend. `backend`: "" or "disk" (default), "disk:/path", or an
+    # "s3://bucket/prefix?..." URL (S3 requires the lib built with the s3
+    # feature). `format`: "gzip" (default), "estargz", "none", or "zstd"
+    # (zstd requires the lib built with that feature). Respects
+    # .gitignore/.dockerignore. Raises on error.
+    def cache_save(sandbox_path, key, backend: "", format: "gzip")
+      rc = Native.cvisor_cache_save(@ptr, sandbox_path, key, backend, format)
+      raise "cache_save failed (errno #{-rc})" if rc != 0
+    end
+
+    # Restore a cached archive stored under `key` into the sandbox overlay at
+    # `sandbox_path`. See #cache_save for `backend`/`format`. Raises on error.
+    def cache_restore(sandbox_path, key, backend: "", format: "gzip")
+      rc = Native.cvisor_cache_restore(@ptr, sandbox_path, key, backend, format)
+      raise "cache_restore failed (errno #{-rc})" if rc != 0
     end
 
     def run(command, timeout_ms: nil)

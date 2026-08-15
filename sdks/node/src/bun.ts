@@ -3,7 +3,7 @@
 
 import { dlopen, FFIType, ptr, toArrayBuffer, type Pointer } from "bun:ffi";
 import { libraryPath } from "./libpath";
-import { buildCommand, bytesToStream, createOutput, Output, RunOptions } from "./output";
+import { buildCommand, bytesToStream, CacheOptions, createOutput, Output, RunOptions } from "./output";
 import {
   makeShell,
   runStreaming as runStreamingImpl,
@@ -38,6 +38,22 @@ const { symbols } = dlopen(libraryPath(), {
   cvisor_sandbox_read_file: {
     args: [FFIType.ptr, FFIType.cstring, FFIType.ptr],
     returns: FFIType.ptr,
+  },
+  cvisor_sandbox_copy_into: {
+    args: [FFIType.ptr, FFIType.cstring, FFIType.cstring],
+    returns: FFIType.i32,
+  },
+  cvisor_sandbox_copy_out: {
+    args: [FFIType.ptr, FFIType.cstring, FFIType.cstring],
+    returns: FFIType.i32,
+  },
+  cvisor_cache_save: {
+    args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring],
+    returns: FFIType.i32,
+  },
+  cvisor_cache_restore: {
+    args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring],
+    returns: FFIType.i32,
   },
   cvisor_run: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.ptr },
   cvisor_run_timeout: {
@@ -82,6 +98,11 @@ const { symbols } = dlopen(libraryPath(), {
   cvisor_session_kill: { args: [FFIType.ptr], returns: FFIType.void },
   cvisor_session_free: { args: [FFIType.ptr], returns: FFIType.void },
 });
+
+/** A NUL-terminated C string pointer for an FFI cstring arg. */
+function cstr(s: string): Pointer {
+  return ptr(Buffer.from(s + "\0", "utf8"));
+}
 
 /** Bind a bun:ffi session pointer to the runtime-agnostic SessionNative shape. */
 function bunSession(sess: Pointer): SessionNative {
@@ -161,6 +182,34 @@ export class Sandbox {
     const copy = new Uint8Array(toArrayBuffer(dataPtr, 0, n)).slice();
     symbols.cvisor_bytes_free(dataPtr, BigInt(n));
     return copy;
+  }
+
+  /** Copy a host file or directory tree into the sandbox (recursive, ignore-aware). */
+  copyInto(hostPath: string, guestPath: string): void {
+    const rc = symbols.cvisor_sandbox_copy_into(this.ptr, cstr(hostPath), cstr(guestPath));
+    if (rc !== 0) throw new Error(`copyInto failed (errno ${-rc})`);
+  }
+
+  /** Copy a sandbox file or directory tree out to the host. */
+  copyOut(guestPath: string, hostPath: string): void {
+    const rc = symbols.cvisor_sandbox_copy_out(this.ptr, cstr(guestPath), cstr(hostPath));
+    if (rc !== 0) throw new Error(`copyOut failed (errno ${-rc})`);
+  }
+
+  /** Archive a sandbox directory to the cache under `key`. */
+  cacheSave(sandboxPath: string, key: string, options: CacheOptions = {}): void {
+    const rc = symbols.cvisor_cache_save(
+      this.ptr, cstr(sandboxPath), cstr(key), cstr(options.backend ?? ""), cstr(options.format ?? "gzip"),
+    );
+    if (rc !== 0) throw new Error(`cacheSave failed (errno ${-rc})`);
+  }
+
+  /** Restore a cached archive (`key`, or its prefix) into a sandbox directory. */
+  cacheRestore(sandboxPath: string, key: string, options: CacheOptions = {}): void {
+    const rc = symbols.cvisor_cache_restore(
+      this.ptr, cstr(sandboxPath), cstr(key), cstr(options.backend ?? ""), cstr(options.format ?? "gzip"),
+    );
+    if (rc !== 0) throw new Error(`cacheRestore failed (errno ${-rc})`);
   }
 
   /** Run a command to completion; the returned Output's streams replay the

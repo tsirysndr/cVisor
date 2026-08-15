@@ -80,17 +80,32 @@ cvisor --no-network -- ...                        # deny outbound networking
 cvisor --allow-listen -- ...                      # permit inbound TCP servers
 cvisor --timeout 5000 -- ...                      # SIGKILL the guest after 5s
 
-# Named, persistent sandboxes + file transfer (files survive across invocations):
-cvisor --sandbox dev cp ./app.py sb:/app/app.py   # host  -> sandbox
-cvisor --sandbox dev -- python3 /app/app.py       # run against the copied file
-cvisor --sandbox dev cp sb:/app/out.txt ./out.txt # sandbox -> host
+# Named, persistent sandboxes + file/dir transfer (survive across invocations):
+cvisor --sandbox dev cp ./src sb:/app              # host -> sandbox (recursive)
+cvisor --sandbox dev -- python3 /app/main.py       # run against the copied files
+cvisor --sandbox dev cp sb:/app/dist ./dist        # sandbox -> host (recursive)
+
+# Cache a directory (backup/restore, keyed) — for build caches, deps, etc.:
+cvisor --sandbox dev cache save deps-v1 sb:/app/node_modules
+cvisor --sandbox ci  cache restore deps-v1 sb:/app/node_modules   # exact or prefix hit
+
+# Check the host can run the sandbox:
+cvisor doctor
 ```
 
 It exits with the guest's exit code. With no `--` command and a terminal on
 stdin, it starts an interactive shell (`isatty`, job control, and line editing
-all work); otherwise it runs a shell reading stdin. In `cp`, prefix the sandbox
-side with `sb:`. Without `--sandbox`, runs are ephemeral; `--sandbox <name>`
-gives a persistent overlay so copied and written files persist.
+all work); otherwise it runs a shell reading stdin. In `cp`/`cache`, prefix the
+sandbox side with `sb:`. Without `--sandbox`, runs are ephemeral; `--sandbox
+<name>` gives a persistent overlay so copied, written, and restored files
+persist.
+
+`cp` and `cache save` are recursive and skip paths matched by `.gitignore` /
+`.dockerignore`. `cache` archives to the host disk by default (or
+`--cache-backend s3://bucket/prefix`) as gzip (default), `--format estargz`,
+`zstd`, or `none`; `cache restore <KEY>` takes an exact key or falls back to the
+newest archive with that key prefix. The distributed binaries built by CI enable
+all formats and the S3 backend.
 
 ### Docker
 

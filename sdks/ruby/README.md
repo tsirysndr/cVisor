@@ -57,6 +57,41 @@ sb.run("echo from-run > /tmp/out.txt")
 sb.read_file("/tmp/out.txt")                # "from-run\n"
 ```
 
+## Copying files and directories
+
+`Sandbox#copy_into(host_path, guest_path)` copies a host file or directory tree
+into the sandbox overlay at `guest_path`, visible to later `#run` calls.
+Directory copies are recursive and honor `.gitignore`/`.dockerignore`.
+`Sandbox#copy_out(guest_path, host_path)` copies the guest's view of
+`guest_path` (file or directory) back out to the host. Both raise on error.
+
+```ruby
+sb.copy_into("./project", "/work")
+sb.run("ls /work").stdout
+sb.copy_out("/work/build", "./build")
+```
+
+## Cache
+
+`Sandbox#cache_save(sandbox_path, key, backend: "", format: "gzip")` archives
+the sandbox directory `sandbox_path` under `key` in a cache backend.
+`Sandbox#cache_restore(sandbox_path, key, backend: "", format: "gzip")` unpacks
+a stored archive back into the sandbox overlay at `sandbox_path`. Both raise on
+error. Directory archives honor `.gitignore`/`.dockerignore`.
+
+```ruby
+sb.cache_save("/work/node_modules", "deps")
+# ... later, in a fresh sandbox ...
+sb2.cache_restore("/work/node_modules", "deps")
+```
+
+- `backend`: `""` or `"disk"` (default), `"disk:/path"` for a specific
+  directory, or an `"s3://bucket/prefix?..."` URL. **S3 requires `libcvisor`
+  built with the `s3` feature; the bundled library is disk-only.**
+- `format`: `"gzip"` (default), `"estargz"`, `"none"`, or `"zstd"`. **`zstd`
+  requires `libcvisor` built with that feature; the bundled library does not
+  include it.**
+
 ## Streaming sessions
 
 `Sandbox#run_streaming(command, on_stdout:, on_stderr:, poll_ms: 15)` starts a

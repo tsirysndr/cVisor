@@ -171,6 +171,69 @@ for an empty or missing file.
 > sandbox (and uid) is stable across its runs. That is why these operations
 > are exposed on the session handle rather than as top-level functions.
 
+### Copying files & directories
+
+Beyond single files, you can copy whole trees between the host and a session's
+sandbox overlay. Like `session_write_file/3`, these operate on the session's
+own sandbox (a stable uid), so copied content is visible to later commands on
+the **same** session.
+
+```erlang
+{ok, S} = cvisor:shell([]),
+%% Copy a host directory tree into the sandbox.
+ok = cvisor:session_copy_into(S, <<"/host/project">>, <<"/tmp/project">>),
+cvisor:session_write(S, <<"ls /tmp/project\n">>),
+%% ...and copy results back out to the host.
+ok = cvisor:session_copy_out(S, <<"/tmp/project/out">>, <<"/host/out">>),
+cvisor:session_free(S).
+```
+
+`session_copy_into/3` and `session_copy_out/3` accept either a single file or a
+directory tree, and return `ok` or `{error, Reason}` (an errno atom such as
+`enoent`).
+
+## Cache
+
+A session can save a directory (or file) from its sandbox overlay to a cache
+under a key, and restore it later — for example to warm a dependency tree
+across a session's commands. As with file seeding, the cache is keyed by the
+session's sandbox uid, so save/restore are meaningful **within a single
+session** (whose sandbox and uid are stable), not across independent `run/1`
+calls.
+
+```erlang
+{ok, S} = cvisor:shell([]),
+ok = cvisor:session_write_file(S, <<"/tmp/proj/data.txt">>, <<"payload">>),
+
+%% Save /tmp/proj under key "k1" (disk backend, gzip format).
+ok = cvisor:session_cache_save(S, <<"/tmp/proj">>, <<"k1">>),
+
+%% Later, restore it into a different path on the same session.
+ok = cvisor:session_cache_restore(S, <<"/tmp/proj2">>, <<"k1">>),
+<<"payload">> = cvisor:session_read_file(S, <<"/tmp/proj2/data.txt">>),
+cvisor:session_free(S).
+```
+
+| Function                                          | Description                                                       |
+| ------------------------------------------------- | ----------------------------------------------------------------- |
+| `session_copy_into(S, HostPath, GuestPath)`       | Copy a host file/dir into the session's sandbox overlay.          |
+| `session_copy_out(S, GuestPath, HostPath)`        | Copy a file/dir out of the overlay to the host.                   |
+| `session_cache_save(S, Path, Key)`                | Save `Path` to the cache under `Key` (disk backend, gzip).        |
+| `session_cache_save(S, Path, Key, Backend, Fmt)`  | As above, choosing the backend and archive format.               |
+| `session_cache_restore(S, Path, Key)`             | Restore cache entry `Key` into `Path` (disk backend, gzip).       |
+| `session_cache_restore(S, Path, Key, Backend, Fmt)`| As above, choosing the backend and archive format.              |
+
+The `/5` forms take a `Backend` and `Format`. `Backend` defaults to the disk
+backend when the empty binary `<<>>` is given; `Format` defaults to `<<"gzip">>`
+in the `/3` forms and also accepts `<<"estargz">>` or `<<"none">>`. The restore
+format must match the format used to save.
+
+> The prebuilt `libcvisor` bundled in this package is built with the **disk**
+> backend and the `gzip`/`estargz`/`none` formats only. Other backends (e.g.
+> `s3`) or formats (e.g. `zstd`) require a `libcvisor` built with those
+> features. All copy/cache operations are **session-scoped**, for the same
+> reason file seeding is (the overlay is keyed by the sandbox's uid).
+
 ## Requirements
 
 - Linux (aarch64 or x86_64) with the seccomp user notifier

@@ -127,8 +127,11 @@ pub fn save(
     }
 }
 
-/// Fetch the archive stored under `key` and unpack it into the overlay at
-/// `sandbox_path` (visible to later runs of the same sandbox).
+/// Fetch the archive for `key` and unpack it into the overlay at `sandbox_path`
+/// (visible to later runs of the same sandbox). Cache-key semantics: an exact
+/// `key` match wins; failing that, the newest archive whose key *starts with*
+/// `key` is used (a partial hit, like a restore-key prefix). Errors with NOENT
+/// if nothing matches.
 pub fn restore(
     uid: [u8; 16],
     sandbox_path: &str,
@@ -136,27 +139,56 @@ pub fn restore(
     backend: &Backend,
     format: Format,
 ) -> SysResult<()> {
+    let name = resolve(key, backend, format)?.ok_or(SysError(Errno::NOENT))?;
     let dst = fileio::write_real_dir(uid, sandbox_path)?;
     match backend {
         Backend::Disk { root } => {
-            let src = root.join(object_name(key, format)?);
-            let file = std::fs::File::open(&src).map_err(io_err)?;
+            let file = std::fs::File::open(root.join(&name)).map_err(io_err)?;
             archive::unpack(file, format, &dst)
         }
         Backend::S3 { .. } => {
-            let bytes = s3_get(backend, &object_name(key, format)?)?;
+            let bytes = s3_get(backend, &name)?;
             archive::unpack(&bytes[..], format, &dst)
         }
     }
 }
 
-/// Whether an archive exists under `key`.
-pub fn exists(key: &str, backend: &Backend, format: Format) -> SysResult<bool> {
-    let name = object_name(key, format)?;
+/// Resolve `key` to a stored object name: the exact `key.ext` if it exists,
+/// else the newest object named `key*…ext` (prefix match), else None.
+fn resolve(key: &str, backend: &Backend, format: Format) -> SysResult<Option<String>> {
+    let exact = object_name(key, format)?;
+    let prefix = safe_key(key)?;
+    let ext = format.ext();
     match backend {
-        Backend::Disk { root } => Ok(root.join(&name).exists()),
-        Backend::S3 { .. } => Ok(s3_get(backend, &name).is_ok()),
+        Backend::Disk { root } => {
+            if root.join(&exact).exists() {
+                return Ok(Some(exact));
+            }
+            let Ok(entries) = std::fs::read_dir(root) else {
+                return Ok(None);
+            };
+            let mut best: Option<(std::time::SystemTime, String)> = None;
+            for e in entries.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with(&prefix) && name.ends_with(&format!(".{ext}")) {
+                    let mtime = e
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::UNIX_EPOCH);
+                    if best.as_ref().map(|(t, _)| mtime > *t).unwrap_or(true) {
+                        best = Some((mtime, name));
+                    }
+                }
+            }
+            Ok(best.map(|(_, n)| n))
+        }
+        Backend::S3 { .. } => s3_resolve(backend, &exact, &prefix, ext),
     }
+}
+
+/// Whether an archive matches `key` (exact or prefix).
+pub fn exists(key: &str, backend: &Backend, format: Format) -> SysResult<bool> {
+    Ok(resolve(key, backend, format)?.is_some())
 }
 
 #[cfg(feature = "s3")]
@@ -211,6 +243,57 @@ fn s3_get(backend: &Backend, name: &str) -> SysResult<Vec<u8>> {
     Ok(resp.bytes().to_vec())
 }
 
+#[cfg(feature = "s3")]
+fn s3_resolve(
+    backend: &Backend,
+    exact: &str,
+    prefix: &str,
+    ext: &str,
+) -> SysResult<Option<String>> {
+    let (bucket, key_prefix) = s3_bucket(backend)?;
+    // Exact hit first.
+    if bucket
+        .head_object_blocking(format!("{key_prefix}{exact}"))
+        .is_ok()
+    {
+        return Ok(Some(exact.to_string()));
+    }
+    // Else newest object whose key starts with the prefix and ends with .ext.
+    let results = bucket
+        .list_blocking(format!("{key_prefix}{prefix}"), None)
+        .map_err(|_| SysError(Errno::IO))?;
+    let suffix = format!(".{ext}");
+    let mut best: Option<(String, String)> = None; // (last_modified, name)
+    for page in results {
+        for obj in page.contents {
+            let name = obj
+                .key
+                .strip_prefix(&key_prefix)
+                .unwrap_or(&obj.key)
+                .to_string();
+            if name.ends_with(&suffix)
+                && best
+                    .as_ref()
+                    .map(|(t, _)| obj.last_modified > *t)
+                    .unwrap_or(true)
+            {
+                best = Some((obj.last_modified.clone(), name));
+            }
+        }
+    }
+    Ok(best.map(|(_, n)| n))
+}
+
+#[cfg(not(feature = "s3"))]
+fn s3_resolve(
+    _backend: &Backend,
+    _exact: &str,
+    _prefix: &str,
+    _ext: &str,
+) -> SysResult<Option<String>> {
+    Err(SysError(Errno::NOSYS))
+}
+
 #[cfg(not(feature = "s3"))]
 fn s3_put(_backend: &Backend, _name: &str, _data: &[u8]) -> SysResult<()> {
     Err(SysError(Errno::NOSYS))
@@ -252,5 +335,35 @@ mod tests {
         assert!(safe_key("../etc").is_err());
         assert!(safe_key("/abs").is_err());
         assert!(safe_key("ok/key-1").is_ok());
+    }
+
+    #[test]
+    fn resolve_prefers_exact_then_prefix() {
+        let root = std::env::temp_dir().join(format!(
+            "cvisor-resolve-{}",
+            crate::generate_uid()
+                .iter()
+                .map(|b| *b as char)
+                .collect::<String>()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let backend = Backend::Disk { root: root.clone() };
+
+        // Only a prefix match exists -> resolve to it.
+        std::fs::write(root.join("deps-aaa.tar.gz"), b"x").unwrap();
+        assert_eq!(
+            resolve("deps-", &backend, Format::Gzip).unwrap().as_deref(),
+            Some("deps-aaa.tar.gz")
+        );
+        // An exact match wins over prefix matches.
+        std::fs::write(root.join("deps-.tar.gz"), b"x").unwrap();
+        assert_eq!(
+            resolve("deps-", &backend, Format::Gzip).unwrap().as_deref(),
+            Some("deps-.tar.gz")
+        );
+        // No match.
+        assert_eq!(resolve("nope", &backend, Format::Gzip).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

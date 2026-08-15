@@ -48,6 +48,23 @@ file written this way is visible to later `run`s of the same sandbox:
 (cvisor/write-file sb "/app/config.json" "{\"k\":1}")
 (cvisor/run sb "cat /app/config.json")
 (String. (cvisor/read-file sb "/tmp/result.txt") "UTF-8")
+
+;; Recursive directory copy (respects .gitignore / .dockerignore):
+(cvisor/copy-into sb "./src" "/app")
+(cvisor/copy-out sb "/app/dist" "./dist")
+```
+
+## Cache
+
+Back up and restore a sandbox directory, keyed — for build caches, deps, etc.
+The bundled library uses the host disk with gzip/estargz/none; the S3 backend
+and zstd need a library built with those features.
+
+```clojure
+(cvisor/cache-save sb "/app/node_modules" "deps-v1")
+;; ...later, in another sandbox — exact key or newest matching prefix:
+(cvisor/cache-restore sb "/app/node_modules" "deps-v1")
+;; options: {:backend "s3://bucket/prefix" :format "estargz"}
 ```
 
 Add `--enable-native-access=ALL-UNNAMED` to your JVM options to silence the

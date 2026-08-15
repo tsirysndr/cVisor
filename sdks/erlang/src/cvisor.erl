@@ -12,7 +12,10 @@
 -export([session_start/2, session_read_stdout/1, session_read_stderr/1,
          session_write/2, session_resize/3, session_try_wait/1,
          session_wait/1, session_kill/1, session_free/1,
-         session_write_file/3, session_read_file/2]).
+         session_write_file/3, session_read_file/2,
+         session_copy_into/3, session_copy_out/3,
+         session_cache_save/3, session_cache_save/5,
+         session_cache_restore/3, session_cache_restore/5]).
 -on_load(init/0).
 
 -type session() :: reference().
@@ -229,6 +232,82 @@ session_write_file(S, Path, Data) when is_binary(Path), is_binary(Data) ->
 session_read_file(S, Path) when is_binary(Path) ->
     session_read_file_nif(S, Path).
 
+%% @doc Copy a host file or directory tree at `HostPath' into the session's
+%% sandbox filesystem overlay at `GuestPath'. Like {@link session_write_file/3},
+%% the copy targets the session's own sandbox (a stable uid held for the
+%% session's lifetime), so the copied content is visible to later commands run
+%% on the SAME session. Accepts either a single file or a whole directory.
+%% Returns `ok', or `{error, Reason}' where `Reason' is an errno atom such as
+%% `enoent' or `eacces'.
+-spec session_copy_into(session(), binary(), binary()) -> ok | {error, atom()}.
+session_copy_into(S, HostPath, GuestPath)
+  when is_binary(HostPath), is_binary(GuestPath) ->
+    session_copy_into_nif(S, HostPath, GuestPath).
+
+%% @doc Copy a file or directory tree at `GuestPath' out of the session's
+%% sandbox filesystem overlay to the host at `HostPath' (the guest's view,
+%% including files produced by earlier commands on this session). Returns `ok',
+%% or `{error, Reason}' (an errno atom).
+-spec session_copy_out(session(), binary(), binary()) -> ok | {error, atom()}.
+session_copy_out(S, GuestPath, HostPath)
+  when is_binary(GuestPath), is_binary(HostPath) ->
+    session_copy_out_nif(S, GuestPath, HostPath).
+
+%% @doc Save `SandboxPath' from the session's sandbox overlay to the cache
+%% under `Key', with the default backend (disk) and `"gzip"' format.
+%% Equivalent to `session_cache_save(S, SandboxPath, Key, <<>>, <<"gzip">>)'.
+-spec session_cache_save(session(), binary(), binary()) -> ok | {error, atom()}.
+session_cache_save(S, SandboxPath, Key)
+  when is_binary(SandboxPath), is_binary(Key) ->
+    session_cache_save(S, SandboxPath, Key, <<>>, <<"gzip">>).
+
+%% @doc Save `SandboxPath' (a file or directory) from the session's sandbox
+%% overlay to the cache under `Key'.
+%%
+%% `Backend' selects where the cache lives; the empty binary `<<>>' means the
+%% default disk backend. `Format' selects the archive format (`"gzip"',
+%% `"estargz"', or `"none"'), defaulting to `"gzip"' in the /3 form.
+%%
+%% Note: the bundled `libcvisor' is built with the disk backend and the
+%% `gzip'/`estargz'/`none' formats only. Other backends (e.g. `s3') or formats
+%% (e.g. `zstd') require a `libcvisor' built with those features.
+%%
+%% Because the cache is keyed by the sandbox's uid overlay, save/restore are
+%% only meaningful within a single session (whose sandbox and uid are stable).
+%% Returns `ok', or `{error, Reason}' (an errno atom).
+-spec session_cache_save(session(), binary(), binary(), binary(), binary()) ->
+    ok | {error, atom()}.
+session_cache_save(S, SandboxPath, Key, Backend, Format)
+  when is_binary(SandboxPath), is_binary(Key), is_binary(Backend),
+       is_binary(Format) ->
+    session_cache_save_nif(S, SandboxPath, Key, Backend, Format).
+
+%% @doc Restore a cache entry (saved under `Key') into `SandboxPath' in the
+%% session's sandbox overlay, with the default backend (disk) and `"gzip"'
+%% format. Equivalent to
+%% `session_cache_restore(S, SandboxPath, Key, <<>>, <<"gzip">>)'.
+-spec session_cache_restore(session(), binary(), binary()) ->
+    ok | {error, atom()}.
+session_cache_restore(S, SandboxPath, Key)
+  when is_binary(SandboxPath), is_binary(Key) ->
+    session_cache_restore(S, SandboxPath, Key, <<>>, <<"gzip">>).
+
+%% @doc Restore a cache entry (saved under `Key') into `SandboxPath' in the
+%% session's sandbox overlay.
+%%
+%% `Backend' defaults to disk when the empty binary `<<>>' is given; `Format'
+%% (`"gzip"'/`"estargz"'/`"none"') must match the format used to save, and
+%% defaults to `"gzip"' in the /3 form. As with {@link session_cache_save/5},
+%% the bundled `libcvisor' supports only the disk backend and the
+%% `gzip'/`estargz'/`none' formats, and save/restore are session-scoped.
+%% Returns `ok', or `{error, Reason}' (an errno atom).
+-spec session_cache_restore(session(), binary(), binary(), binary(),
+                            binary()) -> ok | {error, atom()}.
+session_cache_restore(S, SandboxPath, Key, Backend, Format)
+  when is_binary(SandboxPath), is_binary(Key), is_binary(Backend),
+       is_binary(Format) ->
+    session_cache_restore_nif(S, SandboxPath, Key, Backend, Format).
+
 %% NIF stubs — replaced on load.
 run_nif(_Command, _TimeoutMs) ->
     erlang:nif_error(nif_not_loaded).
@@ -270,6 +349,18 @@ session_write_file_nif(_S, _Path, _Data) ->
     erlang:nif_error(nif_not_loaded).
 
 session_read_file_nif(_S, _Path) ->
+    erlang:nif_error(nif_not_loaded).
+
+session_copy_into_nif(_S, _HostPath, _GuestPath) ->
+    erlang:nif_error(nif_not_loaded).
+
+session_copy_out_nif(_S, _GuestPath, _HostPath) ->
+    erlang:nif_error(nif_not_loaded).
+
+session_cache_save_nif(_S, _SandboxPath, _Key, _Backend, _Format) ->
+    erlang:nif_error(nif_not_loaded).
+
+session_cache_restore_nif(_S, _SandboxPath, _Key, _Backend, _Format) ->
     erlang:nif_error(nif_not_loaded).
 
 init() ->

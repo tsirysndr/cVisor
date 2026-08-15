@@ -44,11 +44,19 @@ networking disabled the guest cannot open INET/INET6 sockets;
 port, `listen`, `accept`).
 
 Files can be transferred in and out of a sandbox's persistent overlay without a
-running guest — `cvisor_sandbox_write_file` / `cvisor_sandbox_read_file`. A file
-written this way is visible to a later `cvisor_run` of the same sandbox; reads
-return the guest's view (the overlay copy, else the real host file for cow
-paths). Each SDK wraps these as `write_file` / `read_file` (and
-`set_allow_listen`).
+running guest — `cvisor_sandbox_write_file` / `cvisor_sandbox_read_file` (single
+file), and `cvisor_sandbox_copy_into` / `cvisor_sandbox_copy_out` (files or whole
+directory trees, recursive and `.gitignore`/`.dockerignore`-aware). A file
+written this way is visible to a later `cvisor_run` of the same sandbox.
+
+`cvisor_cache_save` / `cvisor_cache_restore` back up and restore a sandbox
+directory as a keyed archive — `backend` is the host disk by default (or
+`s3://bucket/prefix`), `format` is gzip / estargz / zstd / none, and restore
+takes an exact key or the newest key with that prefix. Each SDK wraps these as
+`copy_into` / `copy_out` / `cache_save` / `cache_restore` (plus `set_allow_listen`).
+The prebuilt `libcvisor.so` shipped with the SDKs is pure-Rust (disk backend +
+gzip/estargz/none); the S3 backend and zstd need a library built with those
+cargo features.
 
 For streaming output and interactive shells, the ABI also exposes **sessions**
 (`cvisor_session_*`): the guest runs in the background while the caller drains

@@ -3,7 +3,7 @@
 // Needs --allow-ffi (plus --allow-env for the CVISOR_LIB override).
 
 import { libraryPath } from "./libpath";
-import { buildCommand, bytesToStream, createOutput, Output, RunOptions } from "./output";
+import { buildCommand, bytesToStream, CacheOptions, createOutput, Output, RunOptions } from "./output";
 import {
   makeShell,
   runStreaming as runStreamingImpl,
@@ -42,6 +42,22 @@ const lib = Deno.dlopen(libraryPath(), {
   cvisor_sandbox_read_file: {
     parameters: ["pointer", "buffer", "buffer"],
     result: "pointer",
+  },
+  cvisor_sandbox_copy_into: {
+    parameters: ["pointer", "buffer", "buffer"],
+    result: "i32",
+  },
+  cvisor_sandbox_copy_out: {
+    parameters: ["pointer", "buffer", "buffer"],
+    result: "i32",
+  },
+  cvisor_cache_save: {
+    parameters: ["pointer", "buffer", "buffer", "buffer", "buffer"],
+    result: "i32",
+  },
+  cvisor_cache_restore: {
+    parameters: ["pointer", "buffer", "buffer", "buffer", "buffer"],
+    result: "i32",
   },
   cvisor_run: { parameters: ["pointer", "buffer"], result: "pointer" },
   cvisor_run_timeout: {
@@ -105,6 +121,11 @@ function denoSession(sess: Pointer): SessionNative {
 type Pointer = unknown;
 type Accessor = (o: Pointer, lenBuf: Uint8Array) => Pointer;
 
+/** NUL-terminated UTF-8 buffer for a Deno FFI `buffer` string arg. */
+function cstr(s: string): Uint8Array {
+  return new TextEncoder().encode(s + "\0");
+}
+
 function readOutput(out: Pointer, accessor: Accessor): Uint8Array {
   const lenBuf = new Uint8Array(8);
   const p = accessor(out, lenBuf);
@@ -159,6 +180,34 @@ export class Sandbox {
     view.copyInto(copy);
     lib.symbols.cvisor_bytes_free(dataPtr, BigInt(n));
     return copy;
+  }
+
+  /** Copy a host file or directory tree into the sandbox (recursive, ignore-aware). */
+  copyInto(hostPath: string, guestPath: string): void {
+    const rc = lib.symbols.cvisor_sandbox_copy_into(this.#ptr, cstr(hostPath), cstr(guestPath));
+    if (rc !== 0) throw new Error(`copyInto failed (errno ${-rc})`);
+  }
+
+  /** Copy a sandbox file or directory tree out to the host. */
+  copyOut(guestPath: string, hostPath: string): void {
+    const rc = lib.symbols.cvisor_sandbox_copy_out(this.#ptr, cstr(guestPath), cstr(hostPath));
+    if (rc !== 0) throw new Error(`copyOut failed (errno ${-rc})`);
+  }
+
+  /** Archive a sandbox directory to the cache under `key`. */
+  cacheSave(sandboxPath: string, key: string, options: CacheOptions = {}): void {
+    const rc = lib.symbols.cvisor_cache_save(
+      this.#ptr, cstr(sandboxPath), cstr(key), cstr(options.backend ?? ""), cstr(options.format ?? "gzip"),
+    );
+    if (rc !== 0) throw new Error(`cacheSave failed (errno ${-rc})`);
+  }
+
+  /** Restore a cached archive (`key`, or its prefix) into a sandbox directory. */
+  cacheRestore(sandboxPath: string, key: string, options: CacheOptions = {}): void {
+    const rc = lib.symbols.cvisor_cache_restore(
+      this.#ptr, cstr(sandboxPath), cstr(key), cstr(options.backend ?? ""), cstr(options.format ?? "gzip"),
+    );
+    if (rc !== 0) throw new Error(`cacheRestore failed (errno ${-rc})`);
   }
 
   /** Run a command to completion; the returned Output's streams replay the

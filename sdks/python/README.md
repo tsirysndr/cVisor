@@ -93,6 +93,61 @@ with Sandbox() as sb:
 `write_file` raises `OSError` on failure; `read_file` returns `b""` for an empty
 file and raises `FileNotFoundError` for a missing or unreadable path.
 
+### Copying files and directories
+
+`Sandbox.copy_into(host_path, guest_path)` copies a host file — or a whole
+directory tree — into the sandbox's persistent overlay, and
+`Sandbox.copy_out(guest_path, host_path)` copies one back out to the real
+filesystem. Directory copies are recursive and respect `.gitignore` /
+`.dockerignore`. Copied files are visible to later `run` calls:
+
+```python
+with Sandbox() as sb:
+    sb.copy_into("./my-project", "/work")     # host dir -> overlay
+    sb.run("cd /work && make")
+    sb.copy_out("/work/build", "./build-out")  # overlay -> host
+```
+
+Both raise `OSError` on failure.
+
+### Cache
+
+`Sandbox.cache_save(sandbox_path, key, backend="", format="gzip")` archives a
+sandbox **directory** under `key` to a cache backend, and
+`Sandbox.cache_restore(sandbox_path, key, backend="", format="gzip")` unpacks it
+back into the overlay. This lets one sandbox persist a directory (a build tree,
+a dependency cache, …) that a later, independent sandbox can restore:
+
+```python
+with Sandbox() as sb:
+    sb.run("cd /work && npm install")
+    sb.cache_save("/work/node_modules", "npm-deps")
+
+with Sandbox() as sb2:
+    sb2.cache_restore("/work/node_modules", "npm-deps")  # ready to use
+```
+
+Both the archive and `cache_save` respect `.gitignore` / `.dockerignore`.
+
+`backend` selects where the archive is stored:
+
+- `""` or `"disk"` — host disk (the default)
+- `"disk:/path"` — host disk at an explicit location
+- `"s3://bucket/prefix?region=..&endpoint=.."` — S3
+
+S3 requires the library to be built with the `s3` feature; **the bundled
+`libcvisor.so` is not, so `disk` is the working default.**
+
+`format` selects the archive format:
+
+- `""` or `"gzip"` — gzip (the default)
+- `"estargz"` — seekable, lazily-pullable gzip
+- `"none"` — uncompressed
+- `"zstd"` — zstd, only if the library is built with zstd (**the bundled lib is
+  not**)
+
+Both methods raise `OSError` on failure.
+
 ### Streaming output
 
 `Sandbox.run_streaming(cmd, on_stdout=..., on_stderr=..., poll_ms=15)` runs a

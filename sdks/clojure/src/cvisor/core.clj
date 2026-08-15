@@ -57,6 +57,10 @@
        :set-allow-listen    (bind "cvisor_sandbox_set_allow_listen" (fd nil ptr int32))
        :write-file          (bind "cvisor_sandbox_write_file" (fd int32 ptr ptr ptr size-t))
        :read-file           (bind "cvisor_sandbox_read_file" (fd ptr ptr ptr ptr))
+       :copy-into           (bind "cvisor_sandbox_copy_into" (fd int32 ptr ptr ptr))
+       :copy-out            (bind "cvisor_sandbox_copy_out" (fd int32 ptr ptr ptr))
+       :cache-save          (bind "cvisor_cache_save" (fd int32 ptr ptr ptr ptr ptr))
+       :cache-restore       (bind "cvisor_cache_restore" (fd int32 ptr ptr ptr ptr ptr))
        :run                 (bind "cvisor_run" (fd ptr ptr ptr))
        :run-timeout         (bind "cvisor_run_timeout" (fd ptr ptr ptr size-t))
        :output-free         (bind "cvisor_output_free" (fd nil ptr))
@@ -156,6 +160,52 @@
           (.toArray (.reinterpret ^MemorySegment ptr n) ^ValueLayout$OfByte ValueLayout/JAVA_BYTE)
           (finally
             (call :bytes-free ptr n)))))))
+
+(defn- check-rc [op rc]
+  (when-not (zero? rc)
+    (throw (ex-info (str (name op) " failed (errno " (- rc) ")") {:errno (- rc)}))))
+
+(defn copy-into
+  "Copy a host file or directory tree into the sandbox at `guest-path`
+  (recursive; .gitignore / .dockerignore are respected). Throws on failure."
+  [^Sandbox sb ^String host-path ^String guest-path]
+  (with-open [arena (Arena/ofConfined)]
+    (check-rc :copy-into
+              (call :copy-into (live-ptr sb) (.allocateFrom arena host-path)
+                    (.allocateFrom arena guest-path)))))
+
+(defn copy-out
+  "Copy a sandbox file or directory tree out to `host-path`. Throws on failure."
+  [^Sandbox sb ^String guest-path ^String host-path]
+  (with-open [arena (Arena/ofConfined)]
+    (check-rc :copy-out
+              (call :copy-out (live-ptr sb) (.allocateFrom arena guest-path)
+                    (.allocateFrom arena host-path)))))
+
+(defn cache-save
+  "Archive the sandbox directory `sandbox-path` under `key`. Options:
+    :backend — \"\"/\"disk\" (default), \"disk:/path\", or \"s3://bucket/prefix?...\"
+    :format  — \"gzip\" (default), \"estargz\", \"none\", or \"zstd\".
+  The bundled library supports the disk backend and gzip/estargz/none; s3 and
+  zstd require a library built with those features. Throws on failure."
+  ([^Sandbox sb ^String sandbox-path ^String key] (cache-save sb sandbox-path key {}))
+  ([^Sandbox sb ^String sandbox-path ^String key {:keys [backend format] :or {backend "" format "gzip"}}]
+   (with-open [arena (Arena/ofConfined)]
+     (check-rc :cache-save
+               (call :cache-save (live-ptr sb) (.allocateFrom arena sandbox-path)
+                     (.allocateFrom arena key) (.allocateFrom arena backend)
+                     (.allocateFrom arena format))))))
+
+(defn cache-restore
+  "Restore the archive `key` into the sandbox directory `sandbox-path` (visible
+  to later runs of the same sandbox). Same options as `cache-save`."
+  ([^Sandbox sb ^String sandbox-path ^String key] (cache-restore sb sandbox-path key {}))
+  ([^Sandbox sb ^String sandbox-path ^String key {:keys [backend format] :or {backend "" format "gzip"}}]
+   (with-open [arena (Arena/ofConfined)]
+     (check-rc :cache-restore
+               (call :cache-restore (live-ptr sb) (.allocateFrom arena sandbox-path)
+                     (.allocateFrom arena key) (.allocateFrom arena backend)
+                     (.allocateFrom arena format))))))
 
 (defn run
   "Run a shell command in the sandbox, blocking until it exits. Returns
