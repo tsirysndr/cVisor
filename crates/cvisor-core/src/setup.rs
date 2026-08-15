@@ -36,6 +36,9 @@ const GUEST_ENVP: &[&str] = &[
 pub struct ExecOpts {
     /// Allow outbound INET/INET6 sockets (default true).
     pub allow_network: bool,
+    /// Allow inbound TCP servers — bind to a fixed port, `listen`, `accept`
+    /// (default false).
+    pub allow_listen: bool,
     /// Wall-clock limit; the guest process group is SIGKILLed when it elapses.
     pub timeout: Option<Duration>,
     /// Capture writes to fd 1/2 into the log buffers (default true). When false,
@@ -48,6 +51,7 @@ impl Default for ExecOpts {
     fn default() -> ExecOpts {
         ExecOpts {
             allow_network: true,
+            allow_listen: false,
             timeout: None,
             capture_stdio: true,
         }
@@ -246,6 +250,7 @@ fn make_supervisor(
         stderr,
         overlay,
         opts.allow_network,
+        opts.allow_listen,
         opts.capture_stdio,
     ))
 }

@@ -70,19 +70,41 @@ Python, Ruby, Erlang, Clojure, Bun, and Deno SDKs are also published — see
 
 ## Command-line
 
-The `cvisor` binary runs a command in the sandbox, or drops you into an
-interactive sandboxed shell:
+The `cvisor` binary runs a command in the sandbox, drops you into an interactive
+sandboxed shell, or copies files in and out:
 
 ```bash
-cvisor -- uname -a          # run a command, streaming its output
-cvisor                      # interactive /bin/sh on a PTY
-cvisor --no-network -- ...  # deny outbound networking
-cvisor --timeout 5000 -- .. # SIGKILL the guest after 5s
+cvisor -- uname -a                                # run a command, streaming its output
+cvisor                                            # interactive /bin/sh on a PTY
+cvisor --no-network -- ...                        # deny outbound networking
+cvisor --allow-listen -- ...                      # permit inbound TCP servers
+cvisor --timeout 5000 -- ...                      # SIGKILL the guest after 5s
+
+# Named, persistent sandboxes + file transfer (files survive across invocations):
+cvisor --sandbox dev cp ./app.py sb:/app/app.py   # host  -> sandbox
+cvisor --sandbox dev -- python3 /app/app.py       # run against the copied file
+cvisor --sandbox dev cp sb:/app/out.txt ./out.txt # sandbox -> host
 ```
 
 It exits with the guest's exit code. With no `--` command and a terminal on
 stdin, it starts an interactive shell (`isatty`, job control, and line editing
-all work); otherwise it runs a shell reading stdin.
+all work); otherwise it runs a shell reading stdin. In `cp`, prefix the sandbox
+side with `sb:`. Without `--sandbox`, runs are ephemeral; `--sandbox <name>`
+gives a persistent overlay so copied and written files persist.
+
+### Docker
+
+An Alpine image with the CLI is built from the repo `Dockerfile`. cVisor
+installs its own seccomp filter, so run with the default profile disabled:
+
+```bash
+docker build -t cvisor .
+docker run --rm -it --security-opt seccomp=unconfined cvisor           # interactive shell
+docker run --rm --security-opt seccomp=unconfined cvisor -- uname -a    # run a command
+```
+
+Prebuilt static binaries for linux x86_64 and aarch64 are attached to each
+[GitHub Release](https://github.com/tsirysndr/cVisor/releases) (tag `v*`).
 
 ## Examples
 

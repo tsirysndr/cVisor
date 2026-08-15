@@ -271,6 +271,7 @@ fn cross_directory_rename_in_tmp() {
 fn timeout_kills_runaway_command() {
     let opts = ExecOpts {
         allow_network: true,
+        allow_listen: false,
         timeout: Some(std::time::Duration::from_millis(300)),
         capture_stdio: true,
     };
@@ -283,6 +284,7 @@ fn timeout_kills_runaway_command() {
 fn command_under_timeout_completes_normally() {
     let opts = ExecOpts {
         allow_network: true,
+        allow_listen: false,
         timeout: Some(std::time::Duration::from_millis(5000)),
         capture_stdio: true,
     };
@@ -295,6 +297,7 @@ fn command_under_timeout_completes_normally() {
 fn network_disabled_blocks_inet_socket() {
     let opts = ExecOpts {
         allow_network: false,
+        allow_listen: false,
         timeout: None,
         capture_stdio: true,
     };
@@ -306,6 +309,7 @@ fn network_disabled_blocks_inet_socket() {
         "echo still-alive",
         ExecOpts {
             allow_network: false,
+            allow_listen: false,
             timeout: None,
             capture_stdio: true,
         },
@@ -422,4 +426,84 @@ fn pty_session_runs_interactive_shell() {
     let text = String::from_utf8_lossy(&out);
     assert!(text.contains("SESSION_OK"), "pty output: {text:?}");
     assert_eq!(code, 3);
+}
+
+#[test]
+fn allow_listen_gates_fixed_port_bind() {
+    // A fixed-port TCP bind is denied by default (outbound-only) and permitted
+    // when allow_listen is set. `timeout` bounds the otherwise-blocking listen.
+    let denied = ExecOpts {
+        allow_network: true,
+        allow_listen: false,
+        capture_stdio: true,
+        timeout: None,
+    };
+    let (_o, err, _c) = run_opts("timeout 1 nc -l -p 7799", denied);
+    assert!(
+        err.contains("not permitted") || err.contains("Operation not permitted"),
+        "expected a bind denial, got stderr: {err:?}"
+    );
+
+    let allowed = ExecOpts {
+        allow_network: true,
+        allow_listen: true,
+        capture_stdio: true,
+        timeout: None,
+    };
+    let (_o, err, _c) = run_opts("timeout 1 nc -l -p 7799", allowed);
+    assert!(
+        !err.contains("not permitted"),
+        "bind should be permitted with allow_listen, got stderr: {err:?}"
+    );
+}
+
+#[test]
+fn host_written_file_visible_to_run_and_readback() {
+    use cvisor_core::{read_file, write_file};
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let uid = generate_uid();
+
+    // Host writes a file into the sandbox; a run of the SAME sandbox sees it.
+    write_file(uid, "/tmp/seed.txt", b"seeded-content\n").unwrap();
+    let stdout = Arc::new(LogBuffer::new());
+    let stderr = Arc::new(LogBuffer::new());
+    let code = execute_with(
+        uid,
+        LogLevel::Off,
+        "grep seeded /tmp/seed.txt",
+        Arc::clone(&stdout),
+        Arc::clone(&stderr),
+        ExecOpts::default(),
+    )
+    .unwrap();
+    assert_eq!(code, 0);
+    assert_eq!(String::from_utf8_lossy(&stdout.read()), "seeded-content\n");
+
+    // A file written by a run is readable back on the host.
+    execute_with(
+        uid,
+        LogLevel::Off,
+        "echo from-run > /tmp/out.txt",
+        Arc::new(LogBuffer::new()),
+        Arc::new(LogBuffer::new()),
+        ExecOpts::default(),
+    )
+    .unwrap();
+    assert_eq!(read_file(uid, "/tmp/out.txt").unwrap(), b"from-run\n");
+
+    // Host writes into a cow path; the guest reads the shadowing copy.
+    write_file(uid, "/etc/cvisor_seed.conf", b"ok=1\n").unwrap();
+    let stdout = Arc::new(LogBuffer::new());
+    execute_with(
+        uid,
+        LogLevel::Off,
+        "grep ok /etc/cvisor_seed.conf",
+        Arc::clone(&stdout),
+        Arc::new(LogBuffer::new()),
+        ExecOpts::default(),
+    )
+    .unwrap();
+    assert_eq!(String::from_utf8_lossy(&stdout.read()), "ok=1\n");
+
+    let _ = std::fs::remove_dir_all(format!("/tmp/.cvisor/sb/{}", String::from_utf8_lossy(&uid)));
 }

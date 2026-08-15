@@ -98,6 +98,9 @@ pub struct Supervisor {
     start: std::time::Instant,
     /// When false, INET/INET6 sockets and outbound connects are denied.
     allow_network: bool,
+    /// When true, the guest may run inbound TCP servers: bind to a fixed port,
+    /// `listen`, and `accept`. Off by default (outbound-only).
+    allow_listen: bool,
     /// When false, writes to an untracked fd 1/2 are continued to the real
     /// (inherited) fd instead of captured into the log buffers — used for the
     /// CLI and PTY sessions, where stdio flows straight to a terminal.
@@ -124,6 +127,7 @@ impl Supervisor {
         stderr: Arc<LogBuffer>,
         overlay: OverlayRoot,
         allow_network: bool,
+        allow_listen: bool,
         capture_stdio: bool,
     ) -> Supervisor {
         Supervisor {
@@ -136,6 +140,7 @@ impl Supervisor {
             stderr,
             start: std::time::Instant::now(),
             allow_network,
+            allow_listen,
             capture_stdio,
             exit_status: AtomicI32::new(NO_EXIT),
             state: Mutex::new(VirtState {
@@ -250,6 +255,19 @@ impl Supervisor {
             self.sys_socket(notif)
         } else if nr == libc::SYS_bind {
             self.sys_bind(notif)
+        } else if is_listen_syscall(nr) {
+            // Inbound TCP servers: only when explicitly enabled. The socket is a
+            // real kernel fd shared with the guest via addfd, so running listen
+            // (and the subsequent accept) in the guest operates on the bound
+            // socket directly.
+            if self.allow_listen {
+                Ok(notif::reply_continue(notif.id))
+            } else {
+                Ok(notif::reply_error(
+                    notif.id,
+                    crate::error::Errno::PERM.code(),
+                ))
+            }
         } else if nr == libc::SYS_socketpair {
             self.sys_socketpair(notif)
         } else if nr == libc::SYS_connect {
@@ -1578,7 +1596,7 @@ impl Supervisor {
         let mut addr = vec![0u8; addrlen];
         self.mem.read_bytes(caller, addr_ptr, &mut addr)?;
 
-        if let Some(errno) = bind_policy(self.allow_network, &addr) {
+        if let Some(errno) = bind_policy(self.allow_network, self.allow_listen, &addr) {
             return Err(SysError(errno));
         }
         file.bind(&addr)?;
@@ -2293,10 +2311,16 @@ fn remap(notif: &SeccompNotif, args: [u64; 6]) -> SeccompNotif {
 /// policy and the target sockaddr. `None` = allow; `Some(errno)` = deny.
 ///
 /// INET/INET6 binds are denied when networking is off, or when they target a
-/// fixed (non-zero) port — an ephemeral bind (port 0) is the normal client case
-/// (UDP resolvers, TCP source-address pinning) and is allowed. Other address
-/// families (AF_UNIX, AF_NETLINK, …) are not restricted here.
-fn bind_policy(allow_network: bool, addr: &[u8]) -> Option<crate::error::Errno> {
+/// fixed (non-zero) port unless `allow_listen` is set — an ephemeral bind
+/// (port 0) is the normal client case (UDP resolvers, TCP source-address
+/// pinning) and is always allowed. A fixed port means an inbound server, which
+/// requires `allow_listen`. Other address families (AF_UNIX, AF_NETLINK, …) are
+/// not restricted here.
+fn bind_policy(
+    allow_network: bool,
+    allow_listen: bool,
+    addr: &[u8],
+) -> Option<crate::error::Errno> {
     use crate::error::Errno;
     // Need at least family (u16) + port (u16) to classify an INET bind.
     if addr.len() < 4 {
@@ -2311,27 +2335,26 @@ fn bind_policy(allow_network: bool, addr: &[u8]) -> Option<crate::error::Errno> 
     }
     // sin_port / sin6_port both sit at offset 2, in network byte order.
     let port = u16::from_be_bytes([addr[2], addr[3]]);
-    if port != 0 {
+    if port != 0 && !allow_listen {
         return Some(Errno::PERM);
     }
     None
 }
 
+/// Server-side networking syscalls (listen / accept), gated by `allow_listen`.
+fn is_listen_syscall(nr: i64) -> bool {
+    #[cfg(target_arch = "x86_64")]
+    if nr == libc::SYS_accept {
+        return true;
+    }
+    nr == libc::SYS_listen || nr == libc::SYS_accept4
+}
+
 fn blocked_errno(nr: i64) -> Option<crate::error::Errno> {
     use crate::error::Errno;
 
-    // Server-side networking: block `listen`/`accept` so the guest cannot serve
-    // TCP. `bind` is NOT here — it is a normal client operation (UDP resolvers
-    // bind a local ephemeral port, TCP clients may bind a source address), so it
-    // is virtualized by `sys_bind`, which only rejects binding a fixed port.
-    // accept exists only on x86_64; aarch64 uses accept4.
-    #[cfg(target_arch = "x86_64")]
-    if nr == libc::SYS_accept {
-        return Some(Errno::PERM);
-    }
-    if nr == libc::SYS_listen || nr == libc::SYS_accept4 {
-        return Some(Errno::PERM);
-    }
+    // `bind`, `listen`, and `accept` are handled in dispatch (gated by
+    // allow_network / allow_listen), not blocked here.
 
     // Legacy (x86_64-only) filesystem mutators with no `*at` remap above.
     #[cfg(target_arch = "x86_64")]
@@ -2429,6 +2452,7 @@ mod tests {
             Arc::new(LogBuffer::new()),
             overlay,
             true,
+            false,
             true,
         ))
     }
@@ -2723,7 +2747,7 @@ mod tests {
             let resp = sup.handle(&notif(nr, [0; 6]));
             assert_eq!(resp.error, -(crate::error::Errno::NOSYS.code()), "nr={nr}");
         }
-        // listen → EPERM (no inbound servers; bind is allowed for clients).
+        // listen → EPERM by default (no inbound servers unless allow_listen).
         let resp = sup.handle(&notif(libc::SYS_listen, [0; 6]));
         assert_eq!(resp.error, -(crate::error::Errno::PERM.code()));
         sup.state.lock().unwrap().overlay.cleanup();
@@ -2740,16 +2764,18 @@ mod tests {
             a
         };
         // Ephemeral (port 0) is the client case → allowed.
-        assert_eq!(bind_policy(true, &sa_in(0)), None);
-        // A fixed port would stand up a service → denied.
-        assert_eq!(bind_policy(true, &sa_in(8080)), Some(Errno::PERM));
+        assert_eq!(bind_policy(true, false, &sa_in(0)), None);
+        // A fixed port would stand up a service → denied unless allow_listen.
+        assert_eq!(bind_policy(true, false, &sa_in(8080)), Some(Errno::PERM));
+        assert_eq!(bind_policy(true, true, &sa_in(8080)), None);
         // With networking off, even an ephemeral INET bind is denied.
-        assert_eq!(bind_policy(false, &sa_in(0)), Some(Errno::PERM));
+        assert_eq!(bind_policy(false, false, &sa_in(0)), Some(Errno::PERM));
+        assert_eq!(bind_policy(false, true, &sa_in(8080)), Some(Errno::PERM));
         // AF_UNIX (family 1) is not an INET bind → not restricted here.
         let mut unix = vec![0u8; 16];
         unix[0..2].copy_from_slice(&(libc::AF_UNIX as u16).to_ne_bytes());
-        assert_eq!(bind_policy(true, &unix), None);
-        assert_eq!(bind_policy(false, &unix), None);
+        assert_eq!(bind_policy(true, false, &unix), None);
+        assert_eq!(bind_policy(false, false, &unix), None);
     }
 
     #[test]

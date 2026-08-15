@@ -1,0 +1,10 @@
+target/
+**/node_modules/
+.git/
+sdks/**/dist/
+sdks/**/.venv/
+sdks/**/_build/
+sdks/**/ebin/
+sdks/**/doc/
+**/*.so
+**/*.node

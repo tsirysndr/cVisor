@@ -7,6 +7,7 @@
 //! `cfg(target_os = "linux")` and is the source of truth only under Docker.
 
 pub mod error;
+pub mod fileio;
 pub mod log_buffer;
 pub mod types;
 
@@ -31,6 +32,7 @@ pub use setup::{
 };
 
 pub use error::{Errno, SysError, SysResult};
+pub use fileio::{read_file, write_file};
 pub use log_buffer::LogBuffer;
 pub use types::{LogLevel, Stat};
 
@@ -38,6 +40,22 @@ pub use types::{LogLevel, Stat};
 pub fn generate_uid() -> [u8; 16] {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).expect("getrandom failed");
+    hex_uid(&bytes)
+}
+
+/// Derive a stable 16-hex-char sandbox uid from a name, so a named sandbox maps
+/// to the same overlay across invocations (used by the CLI's `--sandbox`).
+pub fn uid_from_name(name: &str) -> [u8; 16] {
+    // FNV-1a over the name → 8 bytes, then the same hex encoding as generate_uid.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in name.as_bytes() {
+        h = (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hex_uid(&h.to_le_bytes())
+}
+
+/// Encode 8 bytes as 16 lowercase-hex ASCII chars (the uid wire form).
+fn hex_uid(bytes: &[u8; 8]) -> [u8; 16] {
     let mut out = [0u8; 16];
     const HEX: &[u8; 16] = b"0123456789abcdef";
     for (i, b) in bytes.iter().enumerate() {
