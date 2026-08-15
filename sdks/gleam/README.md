@@ -80,4 +80,16 @@ docker run --rm --security-opt seccomp=unconfined \
   sh -c 'apk add --no-cache build-base >/dev/null && gleam test'
 ```
 
+## Publishing
+
+The committed `gleam.toml` uses a path dependency on `../erlang` so `gleam test`
+runs against the in-repo Erlang runtime. Hex rejects path deps in a published
+package, so publish via the helper, which swaps the dependency to the Hex
+`cvisor` release, runs `gleam publish`, and restores the path dep afterward:
+
+```bash
+bin/publish.sh            # forwards extra args to `gleam publish`
+```
+
+Bump `HEX_REQ` in `bin/publish.sh` when targeting a new `cvisor` release.
 Releases are tagged `gleam-sdk-v*` in the monorepo.

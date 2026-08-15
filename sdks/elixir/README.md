@@ -65,21 +65,26 @@ configuration is applied to the shared runtime when `run/2` executes.
 
 ## Development
 
-The SDK depends on the `cvisor` Erlang runtime. In the monorepo it is a path
-dependency (`../erlang`); building it compiles the NIF and needs the prebuilt
-`libcvisor.so` in the Erlang SDK's `priv/` (run `cargo xtask ffi` from the repo
-root first). Point the runtime at a specific library with `CVISOR_LIB` if the
-bundled one isn't found.
+The SDK depends on the `cvisor` Erlang runtime. `mix.exs` defaults to the Hex
+release (`{:cvisor, "~> 0.3"}`); set `CVISOR_PATH=../erlang` to build and test
+against the local Erlang source in the monorepo instead. Either way, building it
+compiles the NIF and needs the prebuilt `libcvisor.so` in the Erlang SDK's
+`priv/` (run `cargo xtask ffi` from the repo root first). Point the runtime at a
+specific library with `CVISOR_LIB` if the bundled one isn't found.
 
 Run the tests in a musl Elixir container (Linux syscalls + seccomp required):
 
 ```bash
 docker run --rm --security-opt seccomp=unconfined \
   -e CVISOR_LIB="$PWD/sdks/erlang/priv/libcvisor-$(uname -m).so" \
+  -e CVISOR_PATH=../erlang \
   -v "$PWD":/w -w /w/sdks/elixir elixir:otp-27-alpine \
   sh -c 'apk add --no-cache build-base >/dev/null &&
          mix local.rebar --force && mix local.hex --force &&
          mix deps.get && mix test'
 ```
+
+To publish, run `mix hex.publish` **without** `CVISOR_PATH` so the package
+depends on the Hex `cvisor` release rather than a path.
 
 Releases are tagged `elixir-sdk-v*` in the monorepo.

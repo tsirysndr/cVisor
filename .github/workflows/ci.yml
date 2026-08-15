@@ -158,15 +158,16 @@ jobs:
               bash linux-install.sh >/dev/null 2>&1 &&
               clojure -M:test'
 
-      # Elixir wraps the Erlang `cvisor` NIF as a path dep (../erlang), so mount
-      # all of sdks/ and point CVISOR_LIB at the erlang priv .so. Mix compiles
-      # the rebar3 dep (building the NIF via its Makefile pre-hook) then runs the
-      # ExUnit suite.
+      # Elixir wraps the Erlang `cvisor` NIF. mix.exs defaults to the Hex release
+      # but takes CVISOR_PATH to build against the local Erlang source — set here
+      # so CI tests the in-repo runtime (../erlang, which Mix compiles via its
+      # Makefile pre-hook). CVISOR_LIB points at the freshly built priv .so.
       - name: Elixir SDK (cvisor_ex)
         run: |
           docker run --rm \
             --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
             -e CVISOR_LIB=/sdks/erlang/priv/libcvisor-${{ matrix.arch }}.so \
+            -e CVISOR_PATH=../erlang \
             -v "$PWD/sdks:/sdks" -w /sdks/elixir \
             elixir:otp-27-alpine sh -c '
               apk add --no-cache build-base >/dev/null 2>&1 &&

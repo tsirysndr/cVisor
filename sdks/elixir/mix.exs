@@ -27,11 +27,19 @@ defmodule Cvisor.MixProject do
 
   defp deps do
     [
-      # The NIF-backed Erlang runtime. Published on Hex as `cvisor`; a path dep
-      # in the monorepo. Compiles c_src/cvisor_nif.c and ships libcvisor.so.
-      {:cvisor, path: "../erlang"},
+      cvisor_dep(),
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
+  end
+
+  # The NIF-backed Erlang runtime (`cvisor` on Hex). A published package can't
+  # carry a path dep, so default to the Hex release; in the monorepo, set
+  # CVISOR_PATH=../erlang to build/test against the local Erlang source.
+  defp cvisor_dep do
+    case System.get_env("CVISOR_PATH") do
+      nil -> {:cvisor, "~> 0.3"}
+      path -> {:cvisor, path: path}
+    end
   end
 
   defp package do
