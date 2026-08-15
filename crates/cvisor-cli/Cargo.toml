@@ -1,0 +1,23 @@
+[package]
+name = "cvisor-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "cvisor"
+path = "src/main.rs"
+
+[features]
+# Forward the optional archive/backend features to cvisor-core. The distributed
+# musl builds stay pure-Rust by default; enable these on a host where the C deps
+# build (native Linux) for `--format zstd` / `cache --backend s3://...`.
+zstd = ["cvisor-core/zstd"]
+s3 = ["cvisor-core/s3"]
+
+[dependencies]
+cvisor-core = { path = "../cvisor-core" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }

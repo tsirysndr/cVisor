@@ -46,13 +46,23 @@ fn cmd_run(args: &[String]) -> bool {
         return false;
     }
     let target = format!("{arch}-unknown-linux-musl");
-    // Build both the supervisor and the in-sandbox scorecard.
+    // Build the CLI supervisor (cvisor-cli) and the in-sandbox scorecard (smoke).
+    if !run(Command::new("cargo").args([
+        "build",
+        "-p",
+        "cvisor-cli",
+        "--bin",
+        "cvisor",
+        "--target",
+        &target,
+        "--release",
+    ])) {
+        return false;
+    }
     if !run(Command::new("cargo").args([
         "build",
         "-p",
         "cvisor-core",
-        "--bin",
-        "cvisor",
         "--bin",
         "smoke",
         "--target",

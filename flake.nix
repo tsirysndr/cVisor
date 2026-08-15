@@ -34,7 +34,7 @@
           strictDeps = true;
           pname = "cvisor";
           # Only the CLI, with all features (zstd archive + S3 cache backend).
-          cargoExtraArgs = "--package cvisor-core --bin cvisor --features zstd,s3";
+          cargoExtraArgs = "--package cvisor-cli --bin cvisor --features zstd,s3";
           # zstd-sys and ring (S3 TLS) build their C with the stdenv compiler;
           # ring's build needs perl.
           nativeBuildInputs = [ pkgs.perl pkgs.pkg-config ];

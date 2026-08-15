@@ -10,10 +10,6 @@ name = "cvisor_core"
 path = "src/lib.rs"
 
 [[bin]]
-name = "cvisor"
-path = "src/bin/cvisor.rs"
-
-[[bin]]
 name = "smoke"
 path = "src/bin/smoke.rs"
 

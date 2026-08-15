@@ -19,7 +19,7 @@ COPY . .
 # feature. Built with all optional features (zstd + s3) enabled.
 ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=gcc \
     CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=gcc
-RUN cargo build -p cvisor-core --bin cvisor --release --features zstd,s3
+RUN cargo build -p cvisor-cli --bin cvisor --release --features zstd,s3
 
 FROM alpine:3.20
 # Tools available to sandboxed commands (busybox provides /bin/sh, which the

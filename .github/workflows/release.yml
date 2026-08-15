@@ -50,7 +50,7 @@ jobs:
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
           CC_aarch64_unknown_linux_musl: musl-gcc
-        run: cargo build -p cvisor-core --bin cvisor --target ${{ matrix.target }} --release --features zstd,s3
+        run: cargo build -p cvisor-cli --bin cvisor --target ${{ matrix.target }} --release --features zstd,s3
 
       - name: Stage artifact
         run: |
