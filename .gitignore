@@ -24,3 +24,13 @@ zig-pkg/
 erl_crash.dump
 *.dump
 *.crashdump
+
+# UI (ui/) build + deps
+ui/node_modules/
+ui/dist/assets/
+ui/dist/*.js
+ui/dist/*.css
+ui/dist/*.map
+ui/dist/fonts/
+ui/src-tauri/target/
+ui/src-tauri/gen/

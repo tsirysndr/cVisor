@@ -7,12 +7,20 @@
 # cVisor installs its own seccomp filter, so the container must run with the
 # default seccomp profile disabled (--security-opt seccomp=unconfined).
 
+# Build the web UI first (the CLI embeds ui/dist via rust-embed).
+FROM oven/bun:alpine AS web
+WORKDIR /src/ui
+COPY ui/ .
+RUN bun install && bun run build
+
 FROM rust:alpine AS build
 # gcc/musl-dev build the C deps (zstd, and ring via the s3 backend's TLS)
 # natively for musl; perl is needed by ring's build.
 RUN apk add --no-cache musl-dev gcc make perl
 WORKDIR /src
 COPY . .
+# Overlay the built web assets so the embedded UI isn't the placeholder.
+COPY --from=web /src/ui/dist ui/dist
 # rust:alpine builds natively for musl. Override the repo's rust-lld linker
 # (set in .cargo/config.toml for the cross-from-macOS flow) with Alpine's gcc,
 # which finds libgcc_s — needed to link host proc-macros pulled in by the s3

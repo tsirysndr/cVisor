@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Terminal / monospace-output font. Drop AgaveNerdFont-Regular.woff2 into
+ * ui/public/fonts/ (from the Agave Nerd Font release) to enable it; otherwise
+ * the ui-monospace fallback is used.
+ */
+@font-face {
+  font-family: "Agave Nerd Font";
+  src: url("/fonts/AgaveNerdFont-Regular.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: "Roboto Mono Variable", ui-monospace, monospace;
+}
+
+/* cmdk palette overrides its item highlight to the charm-purple accent. */
+[cmdk-item][data-selected="true"] {
+  background: rgba(125, 86, 244, 0.18);
+  color: #fafafa;
+}
+
+[cmdk-item] {
+  cursor: pointer;
+}

@@ -234,6 +234,12 @@ jobs:
             mc alias set m http://localhost:9000 minioadmin minioadmin &&
             mc mb --ignore-existing m/cvisor-cache'
 
+      # The CLI embeds the web UI (ui/dist) via rust-embed, so build it first.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Build web UI
+        run: cd ui && bun install && bun run build
+
       # Build the CLI with the s3 (and zstd) features — the C deps compile with
       # the native musl toolchain.
       - name: Build cvisor (--features zstd,s3)

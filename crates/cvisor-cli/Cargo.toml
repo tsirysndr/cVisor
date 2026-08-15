@@ -26,3 +26,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-st
 tokio-stream = "0.1"
 futures-util = "0.3"
 libc = { workspace = true }
+# `cvisor ui`: serve the embedded web UI (built from ui/) and open a browser.
+rust-embed = "8"
+tiny_http = "0.12"
+open = "5"

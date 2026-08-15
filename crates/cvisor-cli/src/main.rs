@@ -7,9 +7,14 @@
 //!   cvisor --timeout 5000 -- .. SIGKILL the guest after N ms
 
 mod remote;
+mod ui;
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
+    // `cvisor ui` serves the embedded web UI; portable (a static server + browser).
+    if argv.get(1).map(String::as_str) == Some("ui") {
+        std::process::exit(ui::main(&argv[2..]));
+    }
     // Remote mode is a gRPC client, so it works on any host. It engages when
     // `--remote` is passed or the CVISOR_REMOTE env var points at a daemon.
     let env_remote = std::env::var("CVISOR_REMOTE").is_ok_and(|v| !v.is_empty());
