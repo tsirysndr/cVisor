@@ -1,0 +1,136 @@
+syntax = "proto3";
+package cvisor;
+
+// The full cVisor runtime, exposed over gRPC. Every RPC operates on a sandbox
+// referenced by its short id or human-readable name; an empty ref means a
+// fresh ephemeral sandbox (one-shot).
+service Cvisor {
+  // Sandbox lifecycle.
+  rpc CreateSandbox(CreateSandboxRequest) returns (Sandbox);
+  rpc ListSandboxes(Empty) returns (SandboxList);
+  rpc FreeSandbox(SandboxRef) returns (Empty);
+  rpc Configure(ConfigureRequest) returns (Sandbox);
+
+  // Run a command to completion (unary), or stream its output as it arrives.
+  rpc Run(RunRequest) returns (RunResponse);
+  rpc RunStream(RunRequest) returns (stream OutputChunk);
+
+  // Interactive session over a bidirectional stream: the client sends a Start,
+  // then stdin/resize; the server streams merged output (PTY) and a final exit.
+  rpc Shell(stream ShellInput) returns (stream ShellOutput);
+
+  // Move files/dirs in and out of a sandbox's overlay.
+  rpc WriteFile(WriteFileRequest) returns (Empty);
+  rpc ReadFile(ReadFileRequest) returns (FileData);
+  rpc CopyInto(CopyRequest) returns (Empty);
+  rpc CopyOut(CopyRequest) returns (Empty);
+
+  // Keyed archive cache of a sandbox directory.
+  rpc CacheSave(CacheRequest) returns (Empty);
+  rpc CacheRestore(CacheRequest) returns (Empty);
+  rpc CacheList(CacheScope) returns (CacheEntries);
+  rpc CacheRemove(CacheRemoveRequest) returns (CacheRemoved);
+  rpc CacheClear(CacheScope) returns (CacheRemoved);
+
+  rpc Health(Empty) returns (HealthResponse);
+}
+
+message Empty {}
+
+// A sandbox reference: its short id or its name.
+message SandboxRef { string id = 1; }
+
+message Limits {
+  uint64 memory_max = 1;  // bytes; 0 = unset
+  uint64 pids_max = 2;    // count; 0 = unset
+  uint32 cpu_percent = 3; // percent of one core; 0 = unset
+}
+
+message EnvVar { string key = 1; string value = 2; }
+
+message CreateSandboxRequest {
+  string name = 1; // optional; empty -> a random docker-style name
+}
+
+message Sandbox {
+  string id = 1;             // short id (12 hex chars)
+  string name = 2;           // human-readable, e.g. "nervous_einstein"
+  bool allow_network = 3;
+  bool allow_listen = 4;
+  Limits limits = 5;
+  repeated EnvVar env = 6;
+}
+
+message SandboxList { repeated Sandbox sandboxes = 1; }
+
+message ConfigureRequest {
+  string id = 1;
+  optional bool allow_network = 2;
+  optional bool allow_listen = 3;
+  optional Limits limits = 4;      // present -> replace limits
+  repeated EnvVar env = 5;         // added/overridden
+}
+
+message RunRequest {
+  string id = 1;             // optional; empty -> ephemeral sandbox
+  string command = 2;
+  uint64 timeout_ms = 3;
+  // Overrides applied to an ephemeral run (ignored when id names a sandbox).
+  optional bool allow_network = 4;
+  optional Limits limits = 5;
+  repeated EnvVar env = 6;
+}
+
+message RunResponse {
+  bytes stdout = 1;
+  bytes stderr = 2;
+  int32 exit_code = 3;
+}
+
+message OutputChunk {
+  oneof kind {
+    bytes stdout = 1;
+    bytes stderr = 2;
+    int32 exit_code = 3;  // terminal message
+  }
+}
+
+message ShellInput {
+  oneof kind {
+    ShellStart start = 1;
+    bytes stdin = 2;
+    Resize resize = 3;
+  }
+}
+message ShellStart {
+  string id = 1;       // optional sandbox ref; empty -> ephemeral
+  string command = 2;  // empty -> interactive /bin/sh -i
+  bool pty = 3;        // true -> PTY (merged output, stdin writable)
+}
+message Resize { uint32 rows = 1; uint32 cols = 2; }
+message ShellOutput {
+  oneof kind {
+    bytes output = 1;
+    int32 exit_code = 2;  // terminal message
+  }
+}
+
+message WriteFileRequest { string id = 1; string path = 2; bytes data = 3; }
+message ReadFileRequest { string id = 1; string path = 2; }
+message FileData { bytes data = 1; }
+message CopyRequest { string id = 1; string host_path = 2; string guest_path = 3; }
+
+message CacheRequest {
+  string id = 1;
+  string path = 2;
+  string key = 3;
+  string backend = 4; // empty -> disk
+  string format = 5;  // empty -> gzip
+}
+message CacheScope { string backend = 1; }
+message CacheEntries { repeated CacheEntry entries = 1; }
+message CacheEntry { string name = 1; uint64 size = 2; }
+message CacheRemoveRequest { string key = 1; string backend = 2; string format = 3; }
+message CacheRemoved { bool removed = 1; uint32 count = 2; }
+
+message HealthResponse { string version = 1; bool ok = 2; }

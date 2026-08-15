@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/cvisor-core",
     "crates/cvisor-cli",
+    "crates/cvisor-proto",
+    "crates/cvisor-daemon",
     "crates/cvisor-node",
     "crates/cvisor-ffi",
     "xtask",

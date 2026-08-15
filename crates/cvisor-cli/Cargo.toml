@@ -18,6 +18,11 @@ s3 = ["cvisor-core/s3"]
 
 [dependencies]
 cvisor-core = { path = "../cvisor-core" }
-
-[target.'cfg(target_os = "linux")'.dependencies]
+# Remote mode (`--remote`): a gRPC client to a cvisord daemon. Portable, so the
+# CLI can drive a remote Linux daemon from any host.
+cvisor-proto = { path = "../cvisor-proto" }
+tonic = "0.12"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "io-util", "signal"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
 libc = { workspace = true }

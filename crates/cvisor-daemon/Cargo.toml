@@ -1,0 +1,36 @@
+[package]
+name = "cvisor-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "cvisord"
+path = "src/main.rs"
+
+[features]
+# Forward the optional archive/backend features to cvisor-core.
+zstd = ["cvisor-core/zstd"]
+s3 = ["cvisor-core/s3"]
+
+# The server stack (gRPC + GraphQL) and the core runtime are Linux-only. On other
+# hosts the crate builds to a stub `cvisord` that reports the platform, so the
+# workspace still checks — keeping the heavy async deps off non-Linux builds.
+[target.'cfg(target_os = "linux")'.dependencies]
+cvisor-core = { path = "../cvisor-core" }
+cvisor-proto = { path = "../cvisor-proto" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+tokio-stream = "0.1"
+tonic = "0.12"
+tonic-reflection = "0.12"
+prost = "0.13"
+actix-web = "4"
+async-graphql = "7"
+async-graphql-actix-web = "7"
+futures-util = "0.3"
+async-stream = "0.3"
+getrandom = { workspace = true }
+hex = "0.4"
+base64 = "0.22"
+serde_json = "1"

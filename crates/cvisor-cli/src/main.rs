@@ -6,15 +6,27 @@
 //!   cvisor --no-network -- ...  disable outbound networking
 //!   cvisor --timeout 5000 -- .. SIGKILL the guest after N ms
 
-#[cfg(not(target_os = "linux"))]
-fn main() {
-    eprintln!("cvisor runs on Linux only");
-    std::process::exit(1);
-}
+mod remote;
 
-#[cfg(target_os = "linux")]
 fn main() {
-    std::process::exit(imp::run());
+    let argv: Vec<String> = std::env::args().collect();
+    // Remote mode is a gRPC client, so it works on any host. It engages when
+    // `--remote` is passed or the CVISOR_REMOTE env var points at a daemon.
+    let env_remote = std::env::var("CVISOR_REMOTE").is_ok_and(|v| !v.is_empty());
+    if env_remote || argv.iter().any(|a| a == "--remote") {
+        std::process::exit(remote::main(&argv[1..]));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::exit(imp::run());
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        eprintln!(
+            "cvisor: the local sandbox runs on Linux only; use --remote <addr> to reach a daemon"
+        );
+        std::process::exit(1);
+    }
 }
 
 #[cfg(target_os = "linux")]
