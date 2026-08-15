@@ -68,6 +68,22 @@ sb.runCmd("chroot /tmp"); // error
 Python, Ruby, Erlang, Clojure, Bun, and Deno SDKs are also published — see
 [sdks/README.md](sdks/README.md).
 
+## Command-line
+
+The `cvisor` binary runs a command in the sandbox, or drops you into an
+interactive sandboxed shell:
+
+```bash
+cvisor -- uname -a          # run a command, streaming its output
+cvisor                      # interactive /bin/sh on a PTY
+cvisor --no-network -- ...  # deny outbound networking
+cvisor --timeout 5000 -- .. # SIGKILL the guest after 5s
+```
+
+It exits with the guest's exit code. With no `--` command and a terminal on
+stdin, it starts an interactive shell (`isatty`, job control, and line editing
+all work); otherwise it runs a shell reading stdin.
+
 ## Examples
 
 Here are a selection of full examples which currently work in cVisor:

@@ -39,6 +39,35 @@ idempotent.
 Add `--enable-native-access=ALL-UNNAMED` to your JVM options to silence the
 FFM restricted-method warning (the `:test` and `:console` aliases already do).
 
+## Streaming output
+
+`run-streaming` runs the command in the background and calls `:on-stdout` /
+`:on-stderr` with String chunks as output arrives, then returns the exit code:
+
+```clojure
+(cvisor/run-streaming
+  sb "for i in 1 2 3; do echo $i; sleep 0.2; done"
+  {:on-stdout (fn [s] (print s) (flush))})   ; => 0
+```
+
+## Interactive PTY shell
+
+`shell` starts an interactive `/bin/sh` on a pseudo-terminal in the background.
+Feed it with `write!`, observe the merged terminal output via `:on-output`,
+resize with `resize!`, and free it with `close`:
+
+```clojure
+(let [sh (cvisor/shell sb {:on-output (fn [s] (print s) (flush))})]
+  (cvisor/write! sh "echo hello; uname -n\n")
+  (cvisor/resize! sh 40 120)
+  (cvisor/write! sh "exit\n")
+  (cvisor/wait sh)       ; block -> exit code
+  (.close sh))
+```
+
+`exit-code` returns the code once finished (nil while running), `wait` blocks
+for it, and `kill!` SIGKILLs the guest.
+
 ## Interactive console
 
 Launch a rebel-readline REPL with a live sandbox preloaded:

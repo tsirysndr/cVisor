@@ -48,18 +48,28 @@
                                     (into-array Linker$Option [])))
           ptr    ValueLayout/ADDRESS
           int32  ValueLayout/JAVA_INT
+          int16  ValueLayout/JAVA_SHORT
           size-t ValueLayout/JAVA_LONG]
-      {:sandbox-new       (bind "cvisor_sandbox_new" (fd ptr))
-       :sandbox-free      (bind "cvisor_sandbox_free" (fd nil ptr))
-       :set-log-level     (bind "cvisor_sandbox_set_log_level" (fd nil ptr int32))
-       :set-allow-network (bind "cvisor_sandbox_set_allow_network" (fd nil ptr int32))
-       :run               (bind "cvisor_run" (fd ptr ptr ptr))
-       :run-timeout       (bind "cvisor_run_timeout" (fd ptr ptr ptr size-t))
-       :output-free       (bind "cvisor_output_free" (fd nil ptr))
-       :output-exit-code  (bind "cvisor_output_exit_code" (fd int32 ptr))
-       :output-stdout     (bind "cvisor_output_stdout" (fd ptr ptr ptr))
-       :output-stderr     (bind "cvisor_output_stderr" (fd ptr ptr ptr))
-       :bytes-free        (bind "cvisor_bytes_free" (fd nil ptr size-t))})))
+      {:sandbox-new         (bind "cvisor_sandbox_new" (fd ptr))
+       :sandbox-free        (bind "cvisor_sandbox_free" (fd nil ptr))
+       :set-log-level       (bind "cvisor_sandbox_set_log_level" (fd nil ptr int32))
+       :set-allow-network   (bind "cvisor_sandbox_set_allow_network" (fd nil ptr int32))
+       :run                 (bind "cvisor_run" (fd ptr ptr ptr))
+       :run-timeout         (bind "cvisor_run_timeout" (fd ptr ptr ptr size-t))
+       :output-free         (bind "cvisor_output_free" (fd nil ptr))
+       :output-exit-code    (bind "cvisor_output_exit_code" (fd int32 ptr))
+       :output-stdout       (bind "cvisor_output_stdout" (fd ptr ptr ptr))
+       :output-stderr       (bind "cvisor_output_stderr" (fd ptr ptr ptr))
+       :bytes-free          (bind "cvisor_bytes_free" (fd nil ptr size-t))
+       :session-start       (bind "cvisor_session_start" (fd ptr ptr ptr int32))
+       :session-read-stdout (bind "cvisor_session_read_stdout" (fd ptr ptr ptr))
+       :session-read-stderr (bind "cvisor_session_read_stderr" (fd ptr ptr ptr))
+       :session-write-stdin (bind "cvisor_session_write_stdin" (fd size-t ptr ptr size-t))
+       :session-resize      (bind "cvisor_session_resize" (fd nil ptr int16 int16))
+       :session-try-wait    (bind "cvisor_session_try_wait" (fd int32 ptr ptr))
+       :session-wait        (bind "cvisor_session_wait" (fd int32 ptr))
+       :session-kill        (bind "cvisor_session_kill" (fd nil ptr))
+       :session-free        (bind "cvisor_session_free" (fd nil ptr))})))
 
 (defn- call [k & args]
   (.invokeWithArguments ^MethodHandle (get @handles k) ^java.util.List (vec args)))
@@ -136,3 +146,118 @@
   "Free the sandbox. Idempotent."
   [^Closeable sb]
   (.close sb))
+
+;; ---------------------------------------------------------------------------
+;; Streaming sessions: run the guest in the background, receive output via
+;; callbacks as it arrives, and (for a PTY shell) feed stdin.
+
+(defrecord Session [ptr]
+  Closeable
+  (close [_]
+    (when-let [p @ptr]
+      (reset! ptr nil)
+      (call :session-free p))))
+
+(defn- live-sess ^MemorySegment [^Session s]
+  (or @(:ptr s) (throw (ex-info "session is closed" {}))))
+
+(defn- drain ^bytes [^Session s accessor]
+  (with-open [arena (Arena/ofConfined)]
+    (read-output arena (live-sess s) accessor)))
+
+(defn exit-code
+  "The guest's exit code if it has finished, else nil."
+  [^Session s]
+  (with-open [arena (Arena/ofConfined)]
+    (let [done (.allocate arena ^MemoryLayout ValueLayout/JAVA_INT)
+          code (call :session-try-wait (live-sess s) done)]
+      (when-not (zero? (.get done ^java.lang.foreign.ValueLayout$OfInt ValueLayout/JAVA_INT 0))
+        code))))
+
+(defn wait
+  "Block until the guest exits and return its exit code."
+  [^Session s]
+  (call :session-wait (live-sess s)))
+
+(defn kill!
+  "SIGKILL the guest process group."
+  [^Session s]
+  (call :session-kill (live-sess s)))
+
+(defn write!
+  "Write a String (or bytes) to the guest's stdin (PTY shells only)."
+  [^Session s data]
+  (let [bytes (if (bytes? data) data (.getBytes ^String data StandardCharsets/UTF_8))
+        n     (alength ^bytes bytes)]
+    (with-open [arena (Arena/ofConfined)]
+      (let [seg (.allocate arena (long (max n 1)))]
+        (when (pos? n)
+          (MemorySegment/copy ^bytes bytes 0 seg ^ValueLayout$OfByte ValueLayout/JAVA_BYTE 0 n))
+        (call :session-write-stdin (live-sess s) seg (long n))))))
+
+(defn resize!
+  "Set the PTY window size (no-op for a non-PTY session)."
+  [^Session s rows cols]
+  (call :session-resize (live-sess s) (short rows) (short cols)))
+
+(defn- start-session ^Session [^Sandbox sb ^String cmd pty?]
+  (with-open [arena (Arena/ofConfined)]
+    (let [c   (if cmd (.allocateFrom arena cmd) (MemorySegment/NULL))
+          ptr (call :session-start (live-ptr sb) c (int (if pty? 1 0)))]
+      (when (null-seg? ptr)
+        (throw (ex-info "failed to start session" {:command cmd})))
+      (->Session (atom ptr)))))
+
+(defn- pump-loop [^Session s poll-ms on-stdout on-stderr]
+  (let [emit (fn [accessor cb]
+               (when cb
+                 (let [b (drain s accessor)]
+                   (when (pos? (alength ^bytes b))
+                     (cb (String. ^bytes b StandardCharsets/UTF_8))))))]
+    (loop []
+      (emit :session-read-stdout on-stdout)
+      (emit :session-read-stderr on-stderr)
+      (if-let [code (exit-code s)]
+        (do ;; final drain after exit
+          (emit :session-read-stdout on-stdout)
+          (emit :session-read-stderr on-stderr)
+          code)
+        (do (Thread/sleep (long poll-ms)) (recur))))))
+
+(defn run-streaming
+  "Run a shell command in the background, invoking :on-stdout / :on-stderr with
+  String chunks as output arrives. Blocks until the guest exits; returns the
+  exit code. Options: :on-stdout fn, :on-stderr fn, :poll-ms (default 15)."
+  ([^Sandbox sb ^String command] (run-streaming sb command {}))
+  ([^Sandbox sb ^String command {:keys [on-stdout on-stderr poll-ms] :or {poll-ms 15}}]
+   (let [s (start-session sb command false)]
+     (try
+       (pump-loop s poll-ms on-stdout on-stderr)
+       (finally
+         (.close s))))))
+
+(defn shell
+  "Start an interactive /bin/sh on a PTY in the background. Returns a Session
+  (Closeable). Options: :on-output fn called with String chunks of the merged
+  terminal output, :poll-ms (default 15). Feed it with `write!`, resize with
+  `resize!`, observe completion with `exit-code`/`wait`, and free with `close`."
+  ([^Sandbox sb] (shell sb {}))
+  ([^Sandbox sb {:keys [on-output poll-ms] :or {poll-ms 15}}]
+   (let [s (start-session sb nil true)]
+     (when on-output
+       (let [emit (fn []
+                    (let [b (drain s :session-read-stdout)]
+                      (when (pos? (alength ^bytes b))
+                        (on-output (String. ^bytes b StandardCharsets/UTF_8)))))]
+         (doto (Thread.
+                ^Runnable
+                (fn []
+                  (loop []
+                    (emit)
+                    (when (nil? (exit-code s))
+                      (Thread/sleep (long poll-ms))
+                      (recur)))
+                  (emit))) ;; final drain after exit
+           (.setDaemon true)
+           (.start))))
+     s)))

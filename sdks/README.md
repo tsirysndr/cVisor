@@ -41,6 +41,13 @@ void           cvisor_bytes_free(uint8_t* ptr, size_t len);
 (0 = no limit); a timed-out run reports exit code 137 (128 + SIGKILL). With
 networking disabled the guest cannot open INET/INET6 sockets.
 
+For streaming output and interactive shells, the ABI also exposes **sessions**
+(`cvisor_session_*`): the guest runs in the background while the caller drains
+`read_stdout`/`read_stderr` as output arrives, feeds `write_stdin` (PTY mode),
+`resize`s, and `wait`s. `cvisor_session_start(sb, cmd, pty)` with `pty=1` runs
+`/bin/sh -i` on a pseudo-terminal (merged output; stdin writable). Each SDK
+builds idiomatic stdout/stderr callbacks on top of the drain functions.
+
 ## Building the native library
 
 From the repo root:

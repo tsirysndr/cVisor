@@ -33,6 +33,28 @@
     ;; The egress kill switch must not crash the shell; the follow-on echo runs.
     (is (= "ok\n" (:stdout (cvisor/run sb "(nc -w1 127.0.0.1 9 </dev/null 2>/dev/null || true); echo ok"))))))
 
+(deftest streaming-callbacks
+  (with-open [sb (cvisor/sandbox)]
+    (let [chunks (atom [])
+          code   (cvisor/run-streaming
+                  sb "for i in 1 2 3; do echo line$i; sleep 0.1; done"
+                  {:on-stdout (fn [s] (swap! chunks conj s))})]
+      (is (= 0 code))
+      (is (= "line1\nline2\nline3\n" (apply str @chunks))))))
+
+(deftest interactive-pty-shell
+  (with-open [sb (cvisor/sandbox)]
+    (let [out (atom "")
+          sh  (cvisor/shell sb {:on-output (fn [s] (swap! out str s))})]
+      (cvisor/write! sh "echo SHELL_OK\n")
+      (cvisor/write! sh "test -t 1 && echo IS_TTY\n")
+      (cvisor/write! sh "exit 4\n")
+      (is (= 4 (cvisor/wait sh)))
+      (Thread/sleep 100) ;; let the output thread drain
+      (is (re-find #"SHELL_OK" @out))
+      (is (re-find #"IS_TTY" @out))
+      (.close sh))))
+
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'cvisor.sandbox-test)]
     (if (zero? (+ fail error))
