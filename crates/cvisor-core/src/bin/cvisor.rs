@@ -27,7 +27,7 @@ fn main() {
         Arc::clone(&stdout),
         Arc::clone(&stderr),
     ) {
-        Ok(()) => 0,
+        Ok(code) => code,
         Err(e) => {
             eprintln!("cvisor: execute failed: {e}");
             1

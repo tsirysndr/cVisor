@@ -26,13 +26,20 @@ which exposes a small C ABI:
 ```c
 CvisorSandbox* cvisor_sandbox_new(void);
 void           cvisor_sandbox_free(CvisorSandbox*);
-void           cvisor_sandbox_set_log_level(CvisorSandbox*, int level); // 0=off 1=debug
-CvisorOutput*  cvisor_run(CvisorSandbox*, const char* cmd);             // blocks
+void           cvisor_sandbox_set_log_level(CvisorSandbox*, int level);      // 0=off 1=debug
+void           cvisor_sandbox_set_allow_network(CvisorSandbox*, int allow);  // 0=deny else allow
+CvisorOutput*  cvisor_run(CvisorSandbox*, const char* cmd);                  // blocks
+CvisorOutput*  cvisor_run_timeout(CvisorSandbox*, const char* cmd, uint64_t timeout_ms);
+int            cvisor_output_exit_code(CvisorOutput*);                       // status, or 128+signo
 void           cvisor_output_free(CvisorOutput*);
 uint8_t*       cvisor_output_stdout(CvisorOutput*, size_t* out_len);
 uint8_t*       cvisor_output_stderr(CvisorOutput*, size_t* out_len);
 void           cvisor_bytes_free(uint8_t* ptr, size_t len);
 ```
+
+`cvisor_run_timeout` SIGKILLs the guest process group when `timeout_ms` elapses
+(0 = no limit); a timed-out run reports exit code 137 (128 + SIGKILL). With
+networking disabled the guest cannot open INET/INET6 sockets.
 
 ## Building the native library
 
@@ -66,7 +73,7 @@ puts Cvisor::Sandbox.new.run("echo hi").stdout
 ```
 ```erlang
 %% Erlang
-{ok, Out, _Err} = cvisor:run(<<"echo hi">>).
+{ok, Out, _Err, 0} = cvisor:run(<<"echo hi">>).
 ```
 ```clojure
 ;; Clojure (io.github.tsirysndr/cvisor on Clojars, JDK 22+)
@@ -74,6 +81,9 @@ puts Cvisor::Sandbox.new.run("echo hi").stdout
 (with-open [sb (cvisor/sandbox)]
   (print (:stdout (cvisor/run sb "echo hi"))))    ; "hi\n"
 ```
+
+Every SDK also surfaces the run's exit code, an optional per-run timeout, and a
+network on/off toggle (see each SDK's README).
 
 ## Interactive consoles
 

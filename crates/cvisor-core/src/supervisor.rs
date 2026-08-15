@@ -12,6 +12,7 @@
 //! arrive with the process model in M4 (this uses one shared table + cwd).
 
 use std::os::fd::RawFd;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -32,6 +33,8 @@ use crate::virt::tombstones::Tombstones;
 const MAX_INFLIGHT: usize = 8;
 const IO_CHUNK: usize = 4096;
 const MAX_IOV: usize = 16;
+/// Max guest path length copied in for `*at` handlers (Linux `PATH_MAX`).
+const PATH_MAX: usize = 4096;
 
 /// All virtual sandbox state, guarded by one mutex.
 pub struct VirtState {
@@ -81,7 +84,6 @@ impl VirtState {
 
 pub struct Supervisor {
     notify_fd: RawFd,
-    #[allow(dead_code)]
     init_guest_tid: i32,
     mem: Box<dyn GuestMem>,
     notifier: Box<dyn Notifier>,
@@ -89,8 +91,17 @@ pub struct Supervisor {
     stdout: Arc<LogBuffer>,
     stderr: Arc<LogBuffer>,
     start: std::time::Instant,
+    /// When false, INET/INET6 sockets and outbound connects are denied.
+    allow_network: bool,
+    /// The init guest's exit_group status, captured from the syscall so the exit
+    /// code survives even when the host process reaps the guest before us (e.g.
+    /// the BEAM's SIGCHLD handler). `NO_EXIT` until the init process exits.
+    exit_status: AtomicI32,
     state: Mutex<VirtState>,
 }
+
+/// Sentinel: the init guest has not reported an exit_group status yet.
+const NO_EXIT: i32 = i32::MIN;
 
 impl Supervisor {
     #[allow(clippy::too_many_arguments)]
@@ -103,6 +114,7 @@ impl Supervisor {
         stdout: Arc<LogBuffer>,
         stderr: Arc<LogBuffer>,
         overlay: OverlayRoot,
+        allow_network: bool,
     ) -> Supervisor {
         Supervisor {
             notify_fd,
@@ -113,6 +125,8 @@ impl Supervisor {
             stdout,
             stderr,
             start: std::time::Instant::now(),
+            allow_network,
+            exit_status: AtomicI32::new(NO_EXIT),
             state: Mutex::new(VirtState {
                 overlay,
                 tombstones: Tombstones::new(),
@@ -319,18 +333,18 @@ impl Supervisor {
             // pipe(fds) -> pipe2(fds, 0)
             let a = notif.data.args;
             self.sys_pipe2(&remap(notif, [a[0], 0, 0, 0, 0, 0]))
-        } else if is_blocked_eperm(nr) {
-            // Inbound networking: outbound-only sandbox.
-            Ok(notif::reply_error(
-                notif.id,
-                crate::error::Errno::PERM.code(),
-            ))
-        } else if is_blocked_enosys(nr) {
-            // Escape/privilege/resource-control syscalls: report unavailable.
-            Ok(notif::reply_error(
-                notif.id,
-                crate::error::Errno::NOSYS.code(),
-            ))
+        } else if nr == libc::SYS_renameat || nr == libc::SYS_renameat2 {
+            // renameat2 flags live in args[4]; sys_renameat rejects the ones it
+            // cannot honor (RENAME_EXCHANGE / RENAME_WHITEOUT).
+            self.sys_renameat(notif)
+        } else if Some(nr) == legacy::RENAME {
+            // rename(old, new) -> renameat(AT_FDCWD, old, AT_FDCWD, new)
+            let a = notif.data.args;
+            self.sys_renameat(&remap(notif, [AT_FDCWD_U64, a[0], AT_FDCWD_U64, a[1], 0, 0]))
+        } else if let Some(errno) = blocked_errno(nr) {
+            // Escape hatches, inbound networking, privilege/resource-control:
+            // denied with a fixed errno (see `blocked_errno`).
+            Ok(notif::reply_error(notif.id, errno.code()))
         } else {
             // Default: let the kernel run it (process-local memory, signals,
             // time, futex, identity reads, etc.). Under the `fail-loudly`
@@ -351,7 +365,7 @@ impl Supervisor {
         let flags = notif.data.args[2] as i32;
         let mode = notif.data.args[3] as u32;
 
-        let mut path_buf = [0u8; 256];
+        let mut path_buf = [0u8; PATH_MAX];
         let path = self.mem.read_string(caller, path_ptr, &mut path_buf)?;
         let path = std::str::from_utf8(path).map_err(|_| SysError(Errno::INVAL))?;
         if path.is_empty() {
@@ -708,7 +722,7 @@ impl Supervisor {
         use crate::error::{Errno, SysError};
         let caller = notif.pid as i32;
         let path_ptr = notif.data.args[0];
-        let mut path_buf = [0u8; 256];
+        let mut path_buf = [0u8; PATH_MAX];
         let path = self.mem.read_string(caller, path_ptr, &mut path_buf)?;
         let path = std::str::from_utf8(path).map_err(|_| SysError(Errno::INVAL))?;
 
@@ -862,7 +876,7 @@ impl Supervisor {
         let flags = notif.data.args[3] as i32;
 
         // AT_EMPTY_PATH + empty path ≡ fstat(dirfd).
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let raw = self
             .mem
             .read_string(caller, path_ptr, &mut pbuf)
@@ -928,7 +942,7 @@ impl Supervisor {
         let statx_addr = notif.data.args[4];
 
         // AT_EMPTY_PATH + empty path ≡ fstat(dirfd).
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let raw = self
             .mem
             .read_string(caller, path_ptr, &mut pbuf)
@@ -985,7 +999,7 @@ impl Supervisor {
         let path_ptr = notif.data.args[1];
         let mode = notif.data.args[2] as i32;
 
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let path = self.read_path(caller, path_ptr, &mut pbuf)?;
 
         let mut state = self.state.lock().unwrap();
@@ -1090,7 +1104,7 @@ impl Supervisor {
         let path_ptr = notif.data.args[1];
         let mode = notif.data.args[2] as u32;
 
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let path = self.read_path(caller, path_ptr, &mut pbuf)?;
 
         let mut state = self.state.lock().unwrap();
@@ -1140,7 +1154,7 @@ impl Supervisor {
             return Err(SysError(Errno::INVAL));
         }
 
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let path = self.read_path(caller, path_ptr, &mut pbuf)?;
 
         let mut state = self.state.lock().unwrap();
@@ -1195,6 +1209,134 @@ impl Supervisor {
         }
     }
 
+    /// renameat / renameat2: virtualized for the common case — a regular file
+    /// moved within the same writable backend (the write-temp-then-rename
+    /// pattern). The real overlay entry is renamed; a cow source is tombstoned
+    /// so its lower-layer original stays hidden. Anything the overlay cannot
+    /// move atomically (directories, cross-backend moves, a passthrough/proc
+    /// endpoint) returns EXDEV, so `mv` and libc fall back to copy+unlink
+    /// through the already-virtualized openat/unlinkat path.
+    fn sys_renameat(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
+        use crate::error::{Errno, SysError};
+        const RENAME_NOREPLACE: u64 = 1;
+
+        let caller = notif.pid as i32;
+        let olddirfd = notif.data.args[0] as i64 as i32;
+        let oldpath_ptr = notif.data.args[1];
+        let newdirfd = notif.data.args[2] as i64 as i32;
+        let newpath_ptr = notif.data.args[3];
+        // Only renameat2 has a flags argument; for renameat (and the legacy
+        // rename remap) args[4] holds an unrelated register, so ignore it.
+        let flags = if notif.data.nr as i64 == libc::SYS_renameat2 {
+            notif.data.args[4]
+        } else {
+            0
+        };
+        // RENAME_EXCHANGE / RENAME_WHITEOUT cannot be emulated over the overlay.
+        if flags & !RENAME_NOREPLACE != 0 {
+            return Err(SysError(Errno::INVAL));
+        }
+
+        let mut obuf = [0u8; PATH_MAX];
+        let oldpath = self.read_path(caller, oldpath_ptr, &mut obuf)?.to_string();
+        let mut nbuf = [0u8; PATH_MAX];
+        let newpath = self.read_path(caller, newpath_ptr, &mut nbuf)?.to_string();
+
+        let mut state = self.state.lock().unwrap();
+        let procinfo = &*self.procinfo;
+        let (sbtype, src) = match state.resolve_path(caller, &oldpath, olddirfd, procinfo)? {
+            ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
+        };
+        let (dbtype, dst) = match state.resolve_path(caller, &newpath, newdirfd, procinfo)? {
+            ResolvedRoute::Block => return Err(SysError(Errno::PERM)),
+            ResolvedRoute::Handle {
+                backend,
+                normalized,
+            } => (backend, normalized),
+        };
+
+        // Only a move within one writable backend is done in place; otherwise
+        // defer to the caller's copy+unlink fallback via EXDEV.
+        let backend = match (sbtype, dbtype) {
+            (BackendType::Cow, BackendType::Cow) => BackendType::Cow,
+            (BackendType::Tmp, BackendType::Tmp) => BackendType::Tmp,
+            _ => return Err(SysError(Errno::XDEV)),
+        };
+
+        let (src_exists, src_is_dir) = self.rename_probe(&state, backend, &src);
+        if !src_exists {
+            return Err(SysError(Errno::NOENT));
+        }
+        // Directory moves go through the copy+unlink fallback (EXDEV) so the
+        // overlay and tombstones stay consistent.
+        if src_is_dir {
+            return Err(SysError(Errno::XDEV));
+        }
+
+        let (dst_exists, dst_is_dir) = self.rename_probe(&state, backend, &dst);
+        if dst_exists {
+            if flags & RENAME_NOREPLACE != 0 {
+                return Err(SysError(Errno::EXIST));
+            }
+            if dst_is_dir {
+                return Err(SysError(Errno::XDEV));
+            }
+        }
+
+        // Materialize the source in the overlay upper, then move it.
+        let (real_src, real_dst) = match backend {
+            BackendType::Cow => {
+                let up_src = state.overlay.resolve_cow(&src);
+                if !OverlayRoot::path_exists_on_real_fs(&up_src) {
+                    // Copy the lower (host) file up before moving it.
+                    state
+                        .overlay
+                        .create_cow_parent_dirs(&src)
+                        .map_err(|_| SysError(Errno::IO))?;
+                    std::fs::copy(&src, &up_src).map_err(|_| SysError(Errno::IO))?;
+                }
+                (up_src, state.overlay.resolve_cow(&dst))
+            }
+            BackendType::Tmp => (state.overlay.resolve_tmp(&src)?, state.overlay.resolve_tmp(&dst)?),
+            _ => unreachable!(),
+        };
+        OverlayRoot::create_parent_dirs(&real_dst).map_err(|_| SysError(Errno::IO))?;
+        if let Err(e) = std::fs::rename(&real_src, &real_dst) {
+            return Err(SysError(
+                e.raw_os_error()
+                    .and_then(Errno::from_raw)
+                    .unwrap_or(Errno::IO),
+            ));
+        }
+
+        // Hide the cow source's lower original; the destination now exists, so
+        // clear any tombstone shadowing it.
+        if backend == BackendType::Cow {
+            state.tombstones.add(&src);
+        }
+        state.tombstones.remove(&dst);
+        Ok(notif::reply_success(notif.id, 0))
+    }
+
+    /// Whether a normalized path is visible in the guest view for the given
+    /// writable backend, and whether it is a directory.
+    fn rename_probe(&self, state: &VirtState, backend: BackendType, path: &str) -> (bool, bool) {
+        match backend {
+            BackendType::Cow => {
+                let visible = !state.tombstones.is_tombstoned(path)
+                    && !state.tombstones.is_ancestor_tombstoned(path)
+                    && state.overlay.guest_path_exists(path);
+                (visible, state.overlay.is_guest_dir(path))
+            }
+            BackendType::Tmp => (state.overlay.tmp_exists(path), state.overlay.is_tmp_dir(path)),
+            _ => (false, false),
+        }
+    }
+
     /// readlinkat: resolve a symlink from the overlay view.
     fn sys_readlinkat(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
         use crate::error::{Errno, SysError};
@@ -1204,7 +1346,7 @@ impl Supervisor {
         let buf_addr = notif.data.args[2];
         let buf_size = (notif.data.args[3] as usize).min(512);
 
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let path = self.read_path(caller, path_ptr, &mut pbuf)?;
 
         let (btype, normalized) = {
@@ -1240,9 +1382,9 @@ impl Supervisor {
         let newdirfd = notif.data.args[1] as i64 as i32;
         let linkpath_ptr = notif.data.args[2];
 
-        let mut tbuf = [0u8; 256];
+        let mut tbuf = [0u8; PATH_MAX];
         let target = self.read_path(caller, target_ptr, &mut tbuf)?.to_string();
-        let mut lbuf = [0u8; 256];
+        let mut lbuf = [0u8; PATH_MAX];
         let linkpath = self.read_path(caller, linkpath_ptr, &mut lbuf)?;
 
         let mut state = self.state.lock().unwrap();
@@ -1356,6 +1498,11 @@ impl Supervisor {
         let domain = notif.data.args[0] as i32;
         let sock_type = notif.data.args[1] as i32;
         let protocol = notif.data.args[2] as i32;
+        // Egress kill switch: no INET/INET6 sockets when networking is disabled
+        // (AF_UNIX and friends still work for local IPC).
+        if !self.allow_network && (domain == libc::AF_INET || domain == libc::AF_INET6) {
+            return Err(crate::error::SysError(crate::error::Errno::PERM));
+        }
         let cloexec = sock_type & libc::SOCK_CLOEXEC != 0;
         // SAFETY: plain socket() with guest-provided args.
         let fd = unsafe { libc::socket(domain, sock_type, protocol) };
@@ -1401,6 +1548,14 @@ impl Supervisor {
         let file = self.caller_fd(caller, fd).ok_or(SysError(Errno::BADF))?;
         let mut addr = vec![0u8; addrlen];
         self.mem.read_bytes(caller, addr_ptr, &mut addr)?;
+        // Defense in depth: deny outbound INET/INET6 connects when networking
+        // is off, even if the socket slipped through.
+        if !self.allow_network && addr.len() >= 2 {
+            let family = u16::from_ne_bytes([addr[0], addr[1]]) as i32;
+            if family == libc::AF_INET || family == libc::AF_INET6 {
+                return Err(SysError(Errno::PERM));
+            }
+        }
         file.connect(&addr)?;
         Ok(notif::reply_success(notif.id, 0))
     }
@@ -1686,7 +1841,7 @@ impl Supervisor {
         if flags & libc::AT_SYMLINK_NOFOLLOW != 0 {
             return Err(SysError(Errno::OPNOTSUPP));
         }
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let path = self.read_path(caller, path_ptr, &mut pbuf)?;
 
         let mut state = self.state.lock().unwrap();
@@ -1725,7 +1880,7 @@ impl Supervisor {
         if path_ptr == 0 {
             return Ok(notif::reply_success(notif.id, 0));
         }
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let path = self.read_path(caller, path_ptr, &mut pbuf)?;
 
         // Read the [timespec;2] (32 bytes) if provided.
@@ -1869,7 +2024,7 @@ impl Supervisor {
         let caller = notif.pid as i32;
         let path_ptr = notif.data.args[0];
 
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let path = self.read_path(caller, path_ptr, &mut pbuf)?;
         let original_len = path.len();
 
@@ -1920,6 +2075,7 @@ impl Supervisor {
     /// exit → prune the caller's virtual thread, then let the kernel exit it.
     fn sys_exit(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
         let caller = notif.pid as i32;
+        self.record_init_exit(caller, notif.data.args[0]);
         self.state
             .lock()
             .unwrap()
@@ -1932,8 +2088,34 @@ impl Supervisor {
     /// perform the real exit_group.
     fn sys_exit_group(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
         let caller = notif.pid as i32;
+        self.record_init_exit(caller, notif.data.args[0]);
         self.state.lock().unwrap().threads.handle_group_exit(caller);
         Ok(notif::reply_continue(notif.id))
+    }
+
+    /// If `caller` is the init guest process, latch its exit status (low 8 bits,
+    /// per `_exit`/`exit_group` convention). Survives `exec` since the pid is
+    /// preserved. This is the authoritative exit code for a normal exit.
+    fn record_init_exit(&self, caller: i32, status_arg: u64) {
+        if caller == self.init_guest_tid {
+            let code = (status_arg & 0xff) as i32;
+            // Keep the first exit we see (the group leader's).
+            let _ = self.exit_status.compare_exchange(
+                NO_EXIT,
+                code,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+        }
+    }
+
+    /// The init guest's exit code if it exited via `exit`/`exit_group`, else None
+    /// (e.g. it was killed by a signal and never reached the syscall).
+    pub fn exit_code(&self) -> Option<i32> {
+        match self.exit_status.load(Ordering::SeqCst) {
+            NO_EXIT => None,
+            code => Some(code),
+        }
     }
 }
 
@@ -1990,6 +2172,7 @@ mod legacy {
     pub const SYMLINK: Option<i64> = nr!(SYS_symlink);
     pub const CHMOD: Option<i64> = nr!(SYS_chmod);
     pub const PIPE: Option<i64> = nr!(SYS_pipe);
+    pub const RENAME: Option<i64> = nr!(SYS_rename);
 }
 
 fn errno_now() -> i32 {
@@ -2004,21 +2187,66 @@ fn remap(notif: &SeccompNotif, args: [u64; 6]) -> SeccompNotif {
     n
 }
 
-/// Inbound-networking syscalls: blocked with EPERM (outbound-only sandbox).
-fn is_blocked_eperm(nr: i64) -> bool {
+/// Syscalls the supervisor refuses outright, and the errno each is denied with.
+///
+/// `None` means "not blocked — dispatch or continue it". The three buckets:
+///   * inbound networking (`EPERM`): this is an outbound-only sandbox;
+///   * escape hatches (`ENOSYS`): interfaces that would let the guest issue
+///     I/O the notifier never sees (io_uring), reopen files by handle or
+///     across the pidfd, resolve paths the router can't inspect (openat2),
+///     or exec/mutate the process outside the interposition layer;
+///   * privilege / namespace / resource-control (`ENOSYS`).
+///
+/// The filesystem-mutating calls that would otherwise `reply_continue` straight
+/// to the host and mutate real files are denied here (`linkat`, `mknodat`,
+/// `fchownat`, `truncate` → `EPERM`) rather than continued. `rename`/`renameat`
+/// are *not* in this list: they are virtualized by `sys_renameat`.
+fn blocked_errno(nr: i64) -> Option<crate::error::Errno> {
+    use crate::error::Errno;
+
     // accept exists only on x86_64; aarch64 uses accept4.
     #[cfg(target_arch = "x86_64")]
-    {
-        if nr == libc::SYS_accept {
-            return true;
-        }
+    if nr == libc::SYS_accept {
+        return Some(Errno::PERM);
     }
-    nr == libc::SYS_bind || nr == libc::SYS_listen || nr == libc::SYS_accept4
-}
+    if nr == libc::SYS_bind || nr == libc::SYS_listen || nr == libc::SYS_accept4 {
+        return Some(Errno::PERM);
+    }
 
-/// Escape / privilege / resource-control syscalls: blocked with ENOSYS.
-fn is_blocked_enosys(nr: i64) -> bool {
-    const BLOCKED: &[i64] = &[
+    // Legacy (x86_64-only) filesystem mutators with no `*at` remap above.
+    #[cfg(target_arch = "x86_64")]
+    if nr == libc::SYS_link
+        || nr == libc::SYS_mknod
+        || nr == libc::SYS_chown
+        || nr == libc::SYS_lchown
+    {
+        return Some(Errno::PERM);
+    }
+
+    const EPERM: &[i64] = &[
+        libc::SYS_linkat,
+        libc::SYS_mknodat,
+        libc::SYS_fchownat,
+        libc::SYS_truncate,
+    ];
+    if EPERM.contains(&nr) {
+        return Some(Errno::PERM);
+    }
+
+    const NOSYS: &[i64] = &[
+        // Escape hatches: I/O paths the notifier cannot interpose on.
+        libc::SYS_io_uring_setup,
+        libc::SYS_io_uring_enter,
+        libc::SYS_io_uring_register,
+        libc::SYS_openat2,
+        libc::SYS_execveat,
+        libc::SYS_open_by_handle_at,
+        libc::SYS_name_to_handle_at,
+        libc::SYS_pidfd_getfd,
+        libc::SYS_userfaultfd,
+        libc::SYS_add_key,
+        libc::SYS_keyctl,
+        // Privilege / namespace / resource-control.
         libc::SYS_ptrace,
         libc::SYS_mount,
         libc::SYS_umount2,
@@ -2039,7 +2267,11 @@ fn is_blocked_enosys(nr: i64) -> bool {
         libc::SYS_prlimit64,
         libc::SYS_personality,
     ];
-    BLOCKED.contains(&nr)
+    if NOSYS.contains(&nr) {
+        return Some(Errno::NOSYS);
+    }
+
+    None
 }
 
 /// Write `val` (NUL-terminated) into a fixed C char array field, zero-padding.
@@ -2076,6 +2308,7 @@ mod tests {
             Arc::new(LogBuffer::new()),
             Arc::new(LogBuffer::new()),
             overlay,
+            true,
         ))
     }
 
@@ -2104,7 +2337,7 @@ mod tests {
     fn open(sup: &Supervisor, path: &std::ffi::CStr, flags: i32, mode: u32) -> SeccompNotifResp {
         // read_string reads a full 256-byte window; back the path with a 256-byte
         // buffer so LocalMem never reads past a short static CStr.
-        let mut pbuf = [0u8; 256];
+        let mut pbuf = [0u8; PATH_MAX];
         let bytes = path.to_bytes_with_nul();
         pbuf[..bytes.len()].copy_from_slice(bytes);
         sup.handle(&notif(

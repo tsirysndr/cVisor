@@ -14,10 +14,11 @@
 
 #[cfg(target_os = "linux")]
 mod imp {
-    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
     use std::sync::Arc;
+    use std::time::Duration;
 
-    use cvisor_core::{cleanup_overlay, execute, generate_uid, LogBuffer, LogLevel};
+    use cvisor_core::{cleanup_overlay, execute_with, generate_uid, ExecOpts, LogBuffer, LogLevel};
     use napi::bindgen_prelude::{External, ExternalRef, Object, Uint8Array};
     use napi::Env;
     use napi_derive::napi;
@@ -27,6 +28,7 @@ mod imp {
     pub struct Sandbox {
         uid: [u8; 16],
         log_level: AtomicU8,
+        allow_network: AtomicBool,
     }
 
     impl Sandbox {
@@ -55,7 +57,13 @@ mod imp {
         External::new(Sandbox {
             uid: generate_uid(),
             log_level: AtomicU8::new(0),
+            allow_network: AtomicBool::new(true),
         })
+    }
+
+    #[napi(js_name = "sandboxSetAllowNetwork")]
+    pub fn sandbox_set_allow_network(sandbox: ExternalRef<Sandbox>, allow: bool) {
+        sandbox.allow_network.store(allow, Ordering::Relaxed);
     }
 
     #[napi(js_name = "sandboxSetLogLevel")]
@@ -78,24 +86,33 @@ mod imp {
         env: &Env,
         sandbox: ExternalRef<Sandbox>,
         command: String,
+        timeout_ms: Option<i64>,
     ) -> napi::Result<Object> {
         let stdout = Arc::new(LogBuffer::new());
         let stderr = Arc::new(LogBuffer::new());
+        let opts = ExecOpts {
+            allow_network: sandbox.allow_network.load(Ordering::Relaxed),
+            timeout: timeout_ms
+                .filter(|ms| *ms > 0)
+                .map(|ms| Duration::from_millis(ms as u64)),
+        };
         // Blocks until the guest command exits (forks inside the Node process;
         // the supervisor loop runs on this thread). Behavior preserved from Zig.
-        execute(
+        let exit_code = execute_with(
             sandbox.uid,
             sandbox.level(),
             &command,
             Arc::clone(&stdout),
             Arc::clone(&stderr),
+            opts,
         )
         .map_err(|e| napi::Error::from_reason(format!("sandbox execute failed: {e}")))?;
 
-        // Return { stdout: External<Stream>, stderr: External<Stream> }.
+        // Return { stdout: External<Stream>, stderr: External<Stream>, exitCode }.
         let mut obj = Object::new(env)?;
         obj.set("stdout", External::new(JsStream { buffer: stdout }))?;
         obj.set("stderr", External::new(JsStream { buffer: stderr }))?;
+        obj.set("exitCode", exit_code)?;
         Ok(obj)
     }
 

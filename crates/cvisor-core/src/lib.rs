@@ -25,7 +25,7 @@ pub mod setup;
 pub mod supervisor;
 
 #[cfg(target_os = "linux")]
-pub use setup::{cleanup_overlay, execute};
+pub use setup::{cleanup_overlay, execute, execute_with, ExecOpts};
 
 pub use error::{Errno, SysError, SysResult};
 pub use log_buffer::LogBuffer;

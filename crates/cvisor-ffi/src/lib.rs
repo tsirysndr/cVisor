@@ -7,8 +7,11 @@
 //! Contract (all handles are opaque pointers; NULL on failure):
 //!   CvisorSandbox* cvisor_sandbox_new(void);
 //!   void           cvisor_sandbox_free(CvisorSandbox*);
-//!   void           cvisor_sandbox_set_log_level(CvisorSandbox*, int level); // 0=off 1=debug
-//!   CvisorOutput*  cvisor_run(CvisorSandbox*, const char* cmd);
+//!   void           cvisor_sandbox_set_log_level(CvisorSandbox*, int level);      // 0=off 1=debug
+//!   void           cvisor_sandbox_set_allow_network(CvisorSandbox*, int allow);  // 0=deny else allow
+//!   CvisorOutput*  cvisor_run(CvisorSandbox*, const char* cmd);                  // blocks
+//!   CvisorOutput*  cvisor_run_timeout(CvisorSandbox*, const char* cmd, uint64_t timeout_ms);
+//!   int            cvisor_output_exit_code(CvisorOutput*);                       // status, or 128+signo
 //!   void           cvisor_output_free(CvisorOutput*);
 //!   uint8_t*       cvisor_output_stdout(CvisorOutput*, size_t* out_len);
 //!   uint8_t*       cvisor_output_stderr(CvisorOutput*, size_t* out_len);
@@ -17,7 +20,7 @@
 //! `cvisor_run` blocks until the guest command exits, then the captured
 //! stdout/stderr are available in full via the `*_stdout`/`*_stderr` accessors
 //! (each returns a freshly allocated copy the caller must release with
-//! `cvisor_bytes_free`).
+//! `cvisor_bytes_free`), and the exit code via `cvisor_output_exit_code`.
 
 #![allow(clippy::missing_safety_doc)]
 
@@ -27,18 +30,24 @@ mod imp {
     use std::os::raw::{c_char, c_int};
     use std::sync::Arc;
 
-    use cvisor_core::{cleanup_overlay, execute, generate_uid, LogBuffer, LogLevel};
+    use std::time::Duration;
+
+    use cvisor_core::{
+        cleanup_overlay, execute_with, generate_uid, ExecOpts, LogBuffer, LogLevel,
+    };
 
     /// Opaque sandbox handle.
     pub struct Sandbox {
         uid: [u8; 16],
         log_level: LogLevel,
+        allow_network: bool,
     }
 
     /// Opaque result handle holding the fully-captured output of one run.
     pub struct Output {
         stdout: Vec<u8>,
         stderr: Vec<u8>,
+        exit_code: i32,
     }
 
     #[no_mangle]
@@ -46,6 +55,7 @@ mod imp {
         Box::into_raw(Box::new(Sandbox {
             uid: generate_uid(),
             log_level: LogLevel::Off,
+            allow_network: true,
         }))
     }
 
@@ -74,6 +84,21 @@ mod imp {
     /// holding the captured stdout/stderr, or NULL on error.
     #[no_mangle]
     pub unsafe extern "C" fn cvisor_run(sb: *mut Sandbox, cmd: *const c_char) -> *mut Output {
+        run_impl(sb, cmd, 0)
+    }
+
+    /// Like cvisor_run, but SIGKILLs the guest after `timeout_ms` (0 = no limit).
+    /// A timed-out run reports exit code 137 (128 + SIGKILL).
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_run_timeout(
+        sb: *mut Sandbox,
+        cmd: *const c_char,
+        timeout_ms: u64,
+    ) -> *mut Output {
+        run_impl(sb, cmd, timeout_ms)
+    }
+
+    unsafe fn run_impl(sb: *mut Sandbox, cmd: *const c_char, timeout_ms: u64) -> *mut Output {
         let Some(sb) = sb.as_ref() else {
             return std::ptr::null_mut();
         };
@@ -85,24 +110,43 @@ mod imp {
             return std::ptr::null_mut();
         };
 
+        let opts = ExecOpts {
+            allow_network: sb.allow_network,
+            timeout: (timeout_ms > 0).then(|| Duration::from_millis(timeout_ms)),
+        };
         let stdout = Arc::new(LogBuffer::new());
         let stderr = Arc::new(LogBuffer::new());
-        if execute(
+        let exit_code = match execute_with(
             sb.uid,
             sb.log_level,
             cmd,
             Arc::clone(&stdout),
             Arc::clone(&stderr),
-        )
-        .is_err()
-        {
-            return std::ptr::null_mut();
-        }
+            opts,
+        ) {
+            Ok(code) => code,
+            Err(_) => return std::ptr::null_mut(),
+        };
 
         Box::into_raw(Box::new(Output {
             stdout: stdout.read(),
             stderr: stderr.read(),
+            exit_code,
         }))
+    }
+
+    /// The guest's exit code (shell convention: status, or 128 + signal).
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_output_exit_code(out: *mut Output) -> c_int {
+        out.as_ref().map(|o| o.exit_code).unwrap_or(-1)
+    }
+
+    /// Enable (nonzero) or disable (0) outbound INET/INET6 networking. Default on.
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_sandbox_set_allow_network(sb: *mut Sandbox, allow: c_int) {
+        if let Some(sb) = sb.as_mut() {
+            sb.allow_network = allow != 0;
+        }
     }
 
     #[no_mangle]

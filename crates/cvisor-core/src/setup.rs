@@ -11,6 +11,7 @@
 
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,15 +29,47 @@ const GUEST_ENVP: &[&str] = &[
     "HOME=/",
 ];
 
+/// Options controlling one sandboxed run.
+#[derive(Clone, Copy)]
+pub struct ExecOpts {
+    /// Allow outbound INET/INET6 sockets (default true).
+    pub allow_network: bool,
+    /// Wall-clock limit; the guest process group is SIGKILLed when it elapses.
+    pub timeout: Option<Duration>,
+}
+
+impl Default for ExecOpts {
+    fn default() -> ExecOpts {
+        ExecOpts {
+            allow_network: true,
+            timeout: None,
+        }
+    }
+}
+
 /// Run `cmd` inside the sandbox, blocking until the guest exits. Captured
-/// stdout/stderr accumulate in the provided buffers.
+/// stdout/stderr accumulate in the provided buffers. Returns the guest's exit
+/// code in shell convention: the exit status for a normal exit, or `128 + signo`
+/// if it was killed by a signal (e.g. `137` for a timeout SIGKILL).
 pub fn execute(
+    uid: [u8; 16],
+    log_level: LogLevel,
+    cmd: &str,
+    stdout: Arc<LogBuffer>,
+    stderr: Arc<LogBuffer>,
+) -> SysResult<i32> {
+    execute_with(uid, log_level, cmd, stdout, stderr, ExecOpts::default())
+}
+
+/// Like [`execute`], with explicit per-run [`ExecOpts`].
+pub fn execute_with(
     uid: [u8; 16],
     _log_level: LogLevel,
     cmd: &str,
     stdout: Arc<LogBuffer>,
     stderr: Arc<LogBuffer>,
-) -> SysResult<()> {
+    opts: ExecOpts,
+) -> SysResult<i32> {
     // Build EVERYTHING that allocates before fork(). In a multithreaded process
     // (the Node SDK, the test harness) another thread may hold the malloc lock
     // at fork time; the child inherits it locked, so any allocation in the child
@@ -66,8 +99,14 @@ pub fn execute(
     }
 
     if pid == 0 {
-        // Child: install the filter (leaking the fd so the supervisor can steal
-        // it via pidfd), then execve. No heap allocation on this path.
+        // Child: become its own process-group leader so the supervisor can kill
+        // the whole guest tree (e.g. on timeout) with kill(-pgid). Then install
+        // the filter (leaking the fd so the supervisor can steal it via pidfd)
+        // and execve. No heap allocation on this path.
+        // SAFETY: setpgid(0, 0) on the calling process; async-signal-safe.
+        unsafe {
+            libc::setpgid(0, 0);
+        }
         match filter::install() {
             Ok(fd) => std::mem::forget(fd),
             Err(_) => unsafe { libc::_exit(1) },
@@ -93,17 +132,68 @@ pub fn execute(
         stdout,
         stderr,
         overlay,
+        opts.allow_network,
     ));
-    supervisor.run();
-    // Keep the notify fd alive for the whole run.
+
+    // Timeout watchdog: SIGKILL the guest process group if the deadline passes.
+    // It exits early when `done_tx` is dropped after the guest finishes, so a
+    // completed run never signals a recycled pid. `timed_out` records whether it
+    // fired, so we report 137 even if the host reaps the guest before we can.
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+    let timed_out = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let watchdog = opts.timeout.map(|timeout| {
+        let timed_out = Arc::clone(&timed_out);
+        std::thread::spawn(move || {
+            if let Err(mpsc::RecvTimeoutError::Timeout) = done_rx.recv_timeout(timeout) {
+                timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
+                // SAFETY: signal the guest's process group (pgid == child_pid).
+                unsafe {
+                    libc::kill(-child_pid, libc::SIGKILL);
+                }
+            }
+        })
+    });
+
+    // run() consumes an Arc; keep a handle to read the captured exit code after.
+    Arc::clone(&supervisor).run();
+    // Guest is gone; stop the watchdog before reaping so it can't signal a
+    // recycled pid, then keep the notify fd alive until after run() returns.
+    drop(done_tx);
+    if let Some(w) = watchdog {
+        let _ = w.join();
+    }
     drop(notify_fd);
 
-    // Reap the guest.
-    // SAFETY: valid pid; status pointer is optional (null).
-    unsafe {
-        libc::waitpid(child_pid, std::ptr::null_mut(), 0);
+    // Reap the guest (best-effort: a host that reaps its own children — e.g. the
+    // BEAM's SIGCHLD handler — may beat us to it, leaving waitpid with ECHILD).
+    let mut status: libc::c_int = 0;
+    // SAFETY: valid child pid; status points at a live int.
+    let reaped = unsafe { libc::waitpid(child_pid, &mut status, 0) } == child_pid;
+
+    // Prefer the watchdog (we know we SIGKILLed it), then the guest's own
+    // exit_group status (host-independent), then a successful waitpid (the only
+    // source that distinguishes a signal death we did not cause).
+    let code = if timed_out.load(std::sync::atomic::Ordering::SeqCst) {
+        128 + libc::SIGKILL
+    } else if let Some(code) = supervisor.exit_code() {
+        code
+    } else if reaped {
+        exit_code_from_status(status)
+    } else {
+        -1
+    };
+    Ok(code)
+}
+
+/// Translate a `waitpid` status into a shell-convention exit code.
+fn exit_code_from_status(status: libc::c_int) -> i32 {
+    if libc::WIFEXITED(status) {
+        libc::WEXITSTATUS(status)
+    } else if libc::WIFSIGNALED(status) {
+        128 + libc::WTERMSIG(status)
+    } else {
+        -1
     }
-    Ok(())
 }
 
 /// Obtain the guest's seccomp-notify fd race-free: open a pidfd, find the fd

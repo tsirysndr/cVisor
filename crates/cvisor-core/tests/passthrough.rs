@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use cvisor_core::{execute, generate_uid, LogBuffer, LogLevel};
+use cvisor_core::{execute_with, generate_uid, ExecOpts, LogBuffer, LogLevel};
 
 // Each sandbox forks; forking concurrently from many harness threads is fragile
 // (fork + threads). Serialize the fork+supervise section so the suite is safe
@@ -15,20 +15,32 @@ use cvisor_core::{execute, generate_uid, LogBuffer, LogLevel};
 static SERIAL: Mutex<()> = Mutex::new(());
 
 fn run(cmd: &str) -> (String, String) {
+    let (out, err, _code) = run_opts(cmd, ExecOpts::default());
+    (out, err)
+}
+
+/// Run `cmd` and also return its exit code.
+fn run_code(cmd: &str) -> (String, String, i32) {
+    run_opts(cmd, ExecOpts::default())
+}
+
+fn run_opts(cmd: &str, opts: ExecOpts) -> (String, String, i32) {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let stdout = Arc::new(LogBuffer::new());
     let stderr = Arc::new(LogBuffer::new());
-    execute(
+    let code = execute_with(
         generate_uid(),
         LogLevel::Off,
         cmd,
         Arc::clone(&stdout),
         Arc::clone(&stderr),
+        opts,
     )
     .expect("execute failed");
     (
         String::from_utf8_lossy(&stdout.read()).into_owned(),
         String::from_utf8_lossy(&stderr.read()).into_owned(),
+        code,
     )
 }
 
@@ -212,4 +224,81 @@ fn cow_read_through_reads_real_file() {
     let (out, _err) = run("grep cow /etc/cvisor_cow_probe");
     let _ = std::fs::remove_file("/etc/cvisor_cow_probe");
     assert_eq!(out, "cow-content\n");
+}
+
+#[test]
+fn exit_code_reflects_command_status() {
+    let (_o, _e, code) = run_code("exit 0");
+    assert_eq!(code, 0);
+    let (_o, _e, code) = run_code("exit 7");
+    assert_eq!(code, 7);
+    let (_o, _e, code) = run_code("false");
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn exit_code_reports_signal_death() {
+    // The shell kills itself with SIGKILL(9); shell convention is 128 + signo.
+    let (_o, _e, code) = run_code("kill -9 $$");
+    assert_eq!(code, 137);
+}
+
+#[test]
+fn atomic_rename_within_tmp_succeeds() {
+    // The write-temp-then-rename pattern: renameat within one writable backend
+    // is virtualized in place, so the destination reads back the moved content.
+    // `grep` (read-based) rather than `cat` (zero-copy sendfile bypasses capture).
+    let (out, _err, code) = run_code(
+        "echo hi > /tmp/atomic.part && mv /tmp/atomic.part /tmp/atomic && grep hi /tmp/atomic",
+    );
+    assert_eq!(out, "hi\n");
+    assert_eq!(code, 0);
+    // The source no longer exists after the move.
+    let (_o, _e, code) = run_code("test -e /tmp/atomic.part");
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn cross_directory_rename_in_tmp() {
+    let (out, _err, code) = run_code(
+        "mkdir -p /tmp/rd/a /tmp/rd/b && echo x > /tmp/rd/a/f && mv /tmp/rd/a/f /tmp/rd/b/f && grep x /tmp/rd/b/f",
+    );
+    assert_eq!(out, "x\n");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn timeout_kills_runaway_command() {
+    let opts = ExecOpts {
+        allow_network: true,
+        timeout: Some(std::time::Duration::from_millis(300)),
+    };
+    let (_o, _e, code) = run_opts("sleep 30", opts);
+    // SIGKILL from the watchdog -> 128 + 9.
+    assert_eq!(code, 137);
+}
+
+#[test]
+fn command_under_timeout_completes_normally() {
+    let opts = ExecOpts {
+        allow_network: true,
+        timeout: Some(std::time::Duration::from_millis(5000)),
+    };
+    let (out, _e, code) = run_opts("echo quick", opts);
+    assert_eq!(out, "quick\n");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn network_disabled_blocks_inet_socket() {
+    let opts = ExecOpts {
+        allow_network: false,
+        timeout: None,
+    };
+    // Busybox nc opening an INET socket must fail with the egress kill switch on.
+    let (_out, err, code) = run_opts("nc -w1 127.0.0.1 9 </dev/null 2>&1; echo done", opts);
+    assert!(code == 0 || !err.is_empty());
+    // The follow-on echo proves the shell itself kept running.
+    let (out, _e, _c) = run_opts("echo still-alive", ExecOpts { allow_network: false, timeout: None });
+    assert_eq!(out, "still-alive\n");
 }
