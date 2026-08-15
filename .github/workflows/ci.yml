@@ -154,14 +154,6 @@ jobs:
   cache-s3:
     name: cache e2e over S3 (minio)
     runs-on: ubuntu-latest
-    services:
-      minio:
-        image: bitnami/minio:latest
-        ports: ["9000:9000"]
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-          MINIO_DEFAULT_BUCKETS: cvisor-cache
     steps:
       - uses: actions/checkout@v4
 
@@ -177,6 +169,20 @@ jobs:
       - name: Install musl C toolchain
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
+      # Run minio as a plain container (a GH service container can't set the
+      # required `server /data` command) and create the bucket with mc.
+      - name: Start minio + bucket
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break || sleep 1
+          done
+          docker run --rm --network host --entrypoint sh minio/mc -c '
+            mc alias set m http://localhost:9000 minioadmin minioadmin &&
+            mc mb --ignore-existing m/cvisor-cache'
+
       # Build the CLI with the s3 (and zstd) features — the C deps compile with
       # the native musl toolchain.
       - name: Build cvisor (--features zstd,s3)
@@ -185,7 +191,7 @@ jobs:
         run: cargo build -p cvisor-core --bin cvisor --target x86_64-unknown-linux-musl --release --features zstd,s3
 
       # The sandbox needs seccomp=unconfined, so run the binary inside an Alpine
-      # container on the host network (to reach the minio service at :9000).
+      # container on the host network (to reach minio at :9000).
       - name: Cache save/restore/ls/rm over S3
         run: |
           CV=target/x86_64-unknown-linux-musl/release/cvisor
@@ -206,3 +212,7 @@ jobs:
               cvisor --sandbox s3 -- grep s3-content /work/a.txt
               cvisor --cache-backend "$BK" cache rm --all
               echo S3_CACHE_OK'
+
+      - name: Stop minio
+        if: always()
+        run: docker rm -f minio || true

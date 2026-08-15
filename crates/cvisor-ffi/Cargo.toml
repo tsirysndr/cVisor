@@ -9,6 +9,14 @@ repository.workspace = true
 name = "cvisor"
 crate-type = ["cdylib"]
 
+# Forward the optional cvisor-core features so an all-features libcvisor.so can
+# be built (`--features zstd,s3` / `--features all`). These only resolve for a
+# Linux target, where cvisor-core is a dependency (see below).
+[features]
+zstd = ["cvisor-core/zstd"]
+s3 = ["cvisor-core/s3"]
+all = ["zstd", "s3"]
+
 # The C ABI is only meaningful on Linux (the sandbox runtime is Linux-only).
 # On other hosts this builds as an empty cdylib so the workspace compiles.
 [target.'cfg(target_os = "linux")'.dependencies]

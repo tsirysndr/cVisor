@@ -74,9 +74,26 @@ cargo xtask ffi                 # builds libcvisor.so and copies it into each SD
 cargo xtask ffi --arch x86_64   # for x86_64 targets
 ```
 
-The build cross-compiles a musl `cdylib` with `cargo-zigbuild`, then patches its
-`NEEDED` entry to the musl runtime soname so it loads on any musl runtime
-(including minimal images without `musl-dev`).
+The default build cross-compiles a **pure-Rust** musl `cdylib` with
+`cargo-zigbuild`, then patches its `NEEDED` entry to the musl runtime soname so
+it loads on any musl runtime (including minimal images without `musl-dev`). This
+build supports the disk cache backend and the gzip/estargz/none archive formats.
+
+### All features (zstd + S3)
+
+The zstd format and the S3 cache backend need C dependencies (`zstd-sys`, and
+`ring` for S3 TLS) that don't cross-compile under `cargo-zigbuild`. To ensure
+`libcvisor.so` has **all** features, build it natively inside `rust:alpine`:
+
+```bash
+cargo xtask ffi --all-features                 # native arch
+cargo xtask ffi --all-features --arch x86_64   # other arch (via qemu)
+```
+
+This forwards the `zstd`/`s3` cargo features (declared in `cvisor-ffi` →
+`cvisor-core`) and builds with a native musl toolchain. The resulting `.so` has
+one extra runtime dependency, `libgcc_s.so.1` (ubiquitous — present on glibc,
+`apk add libgcc` on Alpine); the default pure-Rust `.so` has none.
 
 ## Usage at a glance
 

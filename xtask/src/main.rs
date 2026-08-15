@@ -162,6 +162,45 @@ fn copy_artifact(src: &str, dest: &str) -> bool {
 /// musl-dev. Repoint it at the musl runtime soname present on every musl
 /// image so the .so loads on minimal runtimes (e.g. deno:alpine). Run
 /// patchelf inside an Alpine container so it isn't a host dependency.
+/// Build the all-features libcvisor.so natively inside `rust:alpine` for `arch`
+/// (via `--platform` so it works cross-arch under emulation), writing it to the
+/// host target dir. Uses gcc as the linker so the s3 feature's host proc-macros
+/// find libgcc_s, matching the Dockerfile.
+///
+/// Note: the resulting .so has a runtime `NEEDED libgcc_s.so.1` (ring's unwinder
+/// pulls it on musl+gcc; `-static-libgcc` doesn't fully drop it). It loads on
+/// any system that has libgcc_s — present on glibc, and `apk add libgcc` on
+/// Alpine. The default (pure-Rust) `xtask ffi` build stays fully self-contained.
+fn build_ffi_alpine(arch: &str, target: &str) -> bool {
+    let platform = if arch == "aarch64" {
+        "linux/arm64"
+    } else {
+        "linux/amd64"
+    };
+    let cwd = std::env::current_dir().unwrap();
+    let script = format!(
+        "set -e; apk add --no-cache musl-dev gcc make perl >/dev/null; \
+         export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=gcc \
+                CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=gcc \
+                RUSTFLAGS='-C target-feature=-crt-static -C link-arg=-static-libgcc'; \
+         cargo build -p cvisor-ffi --target {target} --release --features all"
+    );
+    run(Command::new("docker").args([
+        "run",
+        "--rm",
+        "--platform",
+        platform,
+        "-v",
+        &format!("{}:/src", cwd.display()),
+        "-w",
+        "/src",
+        "rust:alpine",
+        "sh",
+        "-c",
+        &script,
+    ]))
+}
+
 fn patch_musl_needed(so: &str, target: &str) -> bool {
     let arch = target.split('-').next().unwrap_or("aarch64");
     let soname = format!("libc.musl-{arch}.so.1");
@@ -243,29 +282,35 @@ fn cmd_run_node(args: &[String]) -> bool {
 
 /// Build the FFI cdylib (libcvisor.so) for the given arch and copy it into the
 /// FFI SDK native dirs so they can load it.
+///
+/// Default: cross-compile a pure-Rust cdylib with cargo-zigbuild (portable,
+/// works from any host). `--all-features`: build natively inside `rust:alpine`
+/// for the arch, so the C deps (zstd, and ring via s3) compile — the resulting
+/// libcvisor.so carries every archive format and the S3 cache backend.
 fn cmd_ffi(args: &[String]) -> bool {
     let arch = parse_arch(args);
     let target = format!("{arch}-unknown-linux-musl");
-    // Dynamic musl cdylib: disable crt-static and link via zig.
-    let ok = run(Command::new("cargo")
-        .args([
-            "zigbuild",
-            "-p",
-            "cvisor-ffi",
-            "--target",
-            &target,
-            "--release",
-        ])
-        .env("RUSTFLAGS", "-C target-feature=-crt-static"));
-    if !ok {
+    let all_features = args.iter().any(|a| a == "--all-features");
+
+    let so = format!("target/{target}/release/libcvisor.so");
+    let built = if all_features {
+        build_ffi_alpine(&arch, &target)
+    } else {
+        // Dynamic musl cdylib: disable crt-static and link via zig.
+        run(Command::new("cargo")
+            .args(["zigbuild", "-p", "cvisor-ffi", "--target", &target, "--release"])
+            .env("RUSTFLAGS", "-C target-feature=-crt-static"))
+    };
+    if !built {
         return false;
     }
-    let so = format!("target/{target}/release/libcvisor.so");
     if !std::path::Path::new(&so).exists() {
         eprintln!("expected {so} to exist");
         return false;
     }
-    if !patch_musl_needed(&so, &target) {
+    // The Alpine build already links the musl soname; only the zigbuild output
+    // needs its NEEDED patched.
+    if !all_features && !patch_musl_needed(&so, &target) {
         eprintln!("warning: patchelf step failed; .so may not load on minimal musl images");
     }
     // Distribute the .so to each FFI SDK's native directory. The Bun/Deno
