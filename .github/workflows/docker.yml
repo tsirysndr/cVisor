@@ -32,8 +32,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      # Build Cloud needs a Docker Hub login on an account entitled to the
+      # builder; this must run before the builder is set up.
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: tsiry
+          password: ${{ secrets.DOCKER_PAT }}
+
+      # No setup-qemu-action: Build Cloud has native amd64 and arm64 machines,
+      # so the arm64 half of the matrix is no longer emulated.
+      - name: Set up Docker Build Cloud
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: "lab:latest"
+          driver: cloud
+          endpoint: "tsiry/default"
+          install: true
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -62,9 +77,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Registry cache rather than type=gha: Actions cache is scoped per ref,
-          # and this workflow only runs on tags, so each tag build would write a
-          # scope no later tag can read. A GHCR-hosted cache has no ref scoping
-          # (and no 10 GB repo cap). image-manifest=true keeps GHCR happy.
-          cache-from: type=registry,ref=ghcr.io/tsirysndr/cvisor:buildcache-${{ matrix.variant }}
-          cache-to: type=registry,ref=ghcr.io/tsirysndr/cvisor:buildcache-${{ matrix.variant }},mode=max,image-manifest=true,oci-mediatypes=true
+          # No cache-from/cache-to: the cloud builder keeps its own persistent
+          # shared cache, so an extra registry export would only add upload time.
