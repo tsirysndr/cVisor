@@ -80,6 +80,8 @@ OPTIONS:
     --sandbox <name>    use a named, persistent sandbox (files survive across
                         invocations). Without it, runs are ephemeral; cp/cache
                         default to the sandbox named \"default\".
+    --repo <url>        git clone <url> inside the sandbox (at /) before the
+                        shell/command runs; also seeds the host's git identity
     -e, --env KEY=VAL   set an environment variable for the guest (repeatable)
     --no-network        deny outbound INET/INET6 networking
     --allow-listen      permit inbound TCP servers (bind fixed port, listen)
@@ -115,6 +117,7 @@ OPTIONS:
     struct Opts {
         exec: ExecOpts,
         sandbox: Option<String>,
+        repo: Option<String>,
         action: Action,
         format: Format,
         cache_backend: String,
@@ -138,6 +141,7 @@ OPTIONS:
             ..ExecOpts::default()
         };
         let mut sandbox = None;
+        let mut repo = None;
         let mut action = Action::Interactive;
         let mut format = Format::Gzip;
         let mut cache_backend = String::new();
@@ -206,6 +210,7 @@ OPTIONS:
                     break;
                 }
                 "--sandbox" => sandbox = Some(args.next().ok_or("--sandbox needs a name")?),
+                "--repo" => repo = Some(args.next().ok_or("--repo needs a git url")?),
                 "-e" | "--env" => {
                     let kv = args.next().ok_or("-e/--env needs KEY=VALUE")?;
                     let (k, v) = kv
@@ -260,6 +265,7 @@ OPTIONS:
         Ok(Opts {
             exec,
             sandbox,
+            repo,
             action,
             format,
             cache_backend,
@@ -281,6 +287,15 @@ OPTIONS:
         };
 
         let uid = opts.uid();
+        // Prepare the sandbox before the workload: seed the host git identity
+        // and clone the requested repository inside it.
+        if let Some(url) = &opts.repo {
+            cvisor_core::git::seed_git_identity(uid);
+            if let Err(e) = cvisor_core::git::clone_repo(uid, url) {
+                eprintln!("cvisor: clone failed: {e}");
+                return 1;
+            }
+        }
         match &opts.action {
             Action::Run(cmd) if !cmd.is_empty() => run_command(uid, cmd, opts.exec),
             Action::Cp { src, dst } => cmd_cp(uid, src, dst),

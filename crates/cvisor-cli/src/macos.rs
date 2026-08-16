@@ -60,6 +60,9 @@ ENV:
     CVISOR_SANDBOX_MEM    RAM MiB (default 2048)
     CVISOR_SANDBOX_DISK   extra disk: a size (8G), a path, or off
     CVISOR_REMOTE         point at an existing daemon instead of the microVM
+
+    Unset CVISOR_SANDBOX_* values fall back to ~/.cvisor/sandbox.json, the
+    settings written by the cVisor desktop app.
 ";
 
 /// The single, reusable sandbox microVM name.
@@ -260,15 +263,49 @@ fn doctor() -> i32 {
 
 // -- helpers ------------------------------------------------------------------
 
-/// The OCI image for the sandbox VM. `CVISOR_SANDBOX_IMAGE` overrides fully;
-/// otherwise `CVISOR_SANDBOX_TAG` selects ubuntu (default) / trixie / alpine.
+/// microVM settings persisted by the desktop app's Settings screen
+/// (`~/.cvisor/sandbox.json`). Each `CVISOR_SANDBOX_*` env var still overrides
+/// its field; the file sits between the env and the built-in defaults.
+#[derive(serde::Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct FileSettings {
+    image: Option<String>,
+    tag: Option<String>,
+    cpus: Option<u32>,
+    mem_mib: Option<u32>,
+    disk: Option<String>,
+}
+
+fn file_settings() -> &'static FileSettings {
+    static SETTINGS: std::sync::OnceLock<FileSettings> = std::sync::OnceLock::new();
+    SETTINGS.get_or_init(|| {
+        std::fs::read_to_string(state_dir().join("sandbox.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    })
+}
+
+/// A non-empty env var, if set.
+fn env_str(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// The OCI image for the sandbox VM. `CVISOR_SANDBOX_IMAGE` (env, then file)
+/// overrides fully; otherwise `CVISOR_SANDBOX_TAG` (env, then file) selects
+/// ubuntu (default) / trixie / alpine.
 fn sandbox_image() -> String {
-    if let Ok(full) = std::env::var("CVISOR_SANDBOX_IMAGE") {
-        if !full.trim().is_empty() {
-            return full;
-        }
+    if let Some(full) = env_str("CVISOR_SANDBOX_IMAGE").or_else(|| {
+        file_settings()
+            .image
+            .clone()
+            .filter(|v| !v.trim().is_empty())
+    }) {
+        return full;
     }
-    let tag = std::env::var("CVISOR_SANDBOX_TAG").unwrap_or_default();
+    let tag = env_str("CVISOR_SANDBOX_TAG")
+        .or_else(|| file_settings().tag.clone())
+        .unwrap_or_default();
     let suffix = match tag.trim() {
         "" | "ubuntu" => "ubuntu-latest",
         "trixie" | "debian" => "trixie-latest",
@@ -279,16 +316,16 @@ fn sandbox_image() -> String {
     format!("ghcr.io/tsirysndr/cvisor:{suffix}")
 }
 
-/// vCPU count and RAM (MiB), from env or defaults (2 vCPU / 2048 MiB).
+/// vCPU count and RAM (MiB): env, then the settings file, then 2 vCPU / 2048 MiB.
 fn resources() -> (u32, u32) {
-    let cpus = std::env::var("CVISOR_SANDBOX_CPUS")
-        .ok()
+    let cpus = env_str("CVISOR_SANDBOX_CPUS")
         .and_then(|v| v.trim().parse().ok())
+        .or(file_settings().cpus)
         .filter(|&n| n > 0)
         .unwrap_or(2);
-    let mem = std::env::var("CVISOR_SANDBOX_MEM")
-        .ok()
+    let mem = env_str("CVISOR_SANDBOX_MEM")
         .and_then(|v| v.trim().parse().ok())
+        .or(file_settings().mem_mib)
         .filter(|&n| n >= 256)
         .unwrap_or(2048);
     (cpus, mem)
@@ -298,7 +335,9 @@ fn resources() -> (u32, u32) {
 /// default), an explicit path, or `off`/`none` to disable. A size-specced disk
 /// is created sparsely under `~/.cvisor/` and reused.
 fn ensure_disk() -> Option<String> {
-    let spec = std::env::var("CVISOR_SANDBOX_DISK").unwrap_or_default();
+    let spec = env_str("CVISOR_SANDBOX_DISK")
+        .or_else(|| file_settings().disk.clone())
+        .unwrap_or_default();
     let spec = spec.trim();
     if matches!(spec, "off" | "none" | "0" | "false") {
         return None;

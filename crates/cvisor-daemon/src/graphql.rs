@@ -270,8 +270,23 @@ pub struct Mutation;
 #[Object]
 impl Mutation {
     /// Create a sandbox; a null/empty name gets a random docker-style name.
-    async fn create_sandbox(&self, ctx: &Context<'_>, name: Option<String>) -> Sandbox {
-        reg(ctx).create_sandbox(name.as_deref()).into()
+    /// Create a sandbox (seeded with the host's git identity). A non-empty
+    /// `repoUrl` is git-cloned inside it before returning.
+    async fn create_sandbox(
+        &self,
+        ctx: &Context<'_>,
+        name: Option<String>,
+        repo_url: Option<String>,
+    ) -> async_graphql::Result<Sandbox> {
+        let reg = reg(ctx);
+        // Cloning a repo can take a while; keep it off the async workers.
+        let info = spawn_blocking(move || {
+            reg.create_sandbox_with_repo(name.as_deref(), repo_url.as_deref())
+        })
+        .await
+        .map_err(|e| Error::new(e.to_string()))?
+        .map_err(|e| Error::new(e.to_string()))?;
+        Ok(info.into())
     }
 
     /// Free a sandbox and clean up its overlay.

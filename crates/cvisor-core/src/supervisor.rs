@@ -12,7 +12,7 @@
 //! arrive with the process model in M4 (this uses one shared table + cwd).
 
 use std::os::fd::RawFd;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -97,10 +97,12 @@ pub struct Supervisor {
     stderr: Arc<LogBuffer>,
     start: std::time::Instant,
     /// When false, INET/INET6 sockets and outbound connects are denied.
-    allow_network: bool,
+    /// Atomic so `configure` can flip it on a live session.
+    allow_network: AtomicBool,
     /// When true, the guest may run inbound TCP servers: bind to a fixed port,
-    /// `listen`, and `accept`. Off by default (outbound-only).
-    allow_listen: bool,
+    /// `listen`, and `accept`. Off by default (outbound-only). Atomic so
+    /// `configure` can flip it on a live session.
+    allow_listen: AtomicBool,
     /// When false, writes to an untracked fd 1/2 are continued to the real
     /// (inherited) fd instead of captured into the log buffers — used for the
     /// CLI and PTY sessions, where stdio flows straight to a terminal.
@@ -139,8 +141,8 @@ impl Supervisor {
             stdout,
             stderr,
             start: std::time::Instant::now(),
-            allow_network,
-            allow_listen,
+            allow_network: AtomicBool::new(allow_network),
+            allow_listen: AtomicBool::new(allow_listen),
             capture_stdio,
             exit_status: AtomicI32::new(NO_EXIT),
             state: Mutex::new(VirtState {
@@ -150,6 +152,13 @@ impl Supervisor {
                 symlinks: crate::virt::symlinks::manager::Symlinks::new(),
             }),
         }
+    }
+
+    /// Swap the network policy on a live guest (`configure` on a running
+    /// sandbox). Takes effect on the next socket/bind/connect/listen syscall.
+    pub fn set_network_policy(&self, allow_network: bool, allow_listen: bool) {
+        self.allow_network.store(allow_network, Ordering::Relaxed);
+        self.allow_listen.store(allow_listen, Ordering::Relaxed);
     }
 
     /// Run until the guest exits.
@@ -203,6 +212,8 @@ impl Supervisor {
         let nr = notif.data.nr as i64;
         let result = if nr == libc::SYS_openat {
             self.sys_openat(notif)
+        } else if nr == libc::SYS_close_range {
+            self.sys_close_range(notif)
         } else if nr == libc::SYS_close {
             self.sys_close(notif)
         } else if nr == libc::SYS_read {
@@ -260,7 +271,7 @@ impl Supervisor {
             // real kernel fd shared with the guest via addfd, so running listen
             // (and the subsequent accept) in the guest operates on the bound
             // socket directly.
-            if self.allow_listen {
+            if self.allow_listen.load(Ordering::Relaxed) {
                 Ok(notif::reply_continue(notif.id))
             } else {
                 Ok(notif::reply_error(
@@ -481,6 +492,29 @@ impl Supervisor {
         let mut state = self.state.lock().unwrap();
         let procinfo = &*self.procinfo;
         state.fd_table(caller, procinfo)?.get(fd)
+    }
+
+    /// close_range: drop the tracked entries in the range, then continue so the
+    /// kernel closes the guest's real fds too. Without this sync the supervisor
+    /// keeps its dups of the guest's pipes alive, so their readers never see
+    /// EOF — which deadlocks fork/exec+pipe protocols (git ↔ git-remote-https,
+    /// python subprocess) after the kernel-side close.
+    fn sys_close_range(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
+        const CLOSE_RANGE_CLOEXEC: u64 = 1 << 2;
+        let caller = notif.pid as i32;
+        let first = notif.data.args[0].min(i32::MAX as u64) as i32;
+        let last = notif.data.args[1].min(i32::MAX as u64) as i32;
+        let flags = notif.data.args[2];
+        let mut state = self.state.lock().unwrap();
+        let procinfo = &*self.procinfo;
+        if let Some(table) = state.fd_table(caller, procinfo) {
+            if flags & CLOSE_RANGE_CLOEXEC != 0 {
+                table.set_cloexec_range(first, last);
+            } else {
+                table.remove_range(first, last);
+            }
+        }
+        Ok(notif::reply_continue(notif.id))
     }
 
     fn sys_close(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
@@ -1542,7 +1576,9 @@ impl Supervisor {
         let protocol = notif.data.args[2] as i32;
         // Egress kill switch: no INET/INET6 sockets when networking is disabled
         // (AF_UNIX and friends still work for local IPC).
-        if !self.allow_network && (domain == libc::AF_INET || domain == libc::AF_INET6) {
+        if !self.allow_network.load(Ordering::Relaxed)
+            && (domain == libc::AF_INET || domain == libc::AF_INET6)
+        {
             return Err(crate::error::SysError(crate::error::Errno::PERM));
         }
         let cloexec = sock_type & libc::SOCK_CLOEXEC != 0;
@@ -1596,7 +1632,11 @@ impl Supervisor {
         let mut addr = vec![0u8; addrlen];
         self.mem.read_bytes(caller, addr_ptr, &mut addr)?;
 
-        if let Some(errno) = bind_policy(self.allow_network, self.allow_listen, &addr) {
+        if let Some(errno) = bind_policy(
+            self.allow_network.load(Ordering::Relaxed),
+            self.allow_listen.load(Ordering::Relaxed),
+            &addr,
+        ) {
             return Err(SysError(errno));
         }
         file.bind(&addr)?;
@@ -1617,7 +1657,7 @@ impl Supervisor {
         self.mem.read_bytes(caller, addr_ptr, &mut addr)?;
         // Defense in depth: deny outbound INET/INET6 connects when networking
         // is off, even if the socket slipped through.
-        if !self.allow_network && addr.len() >= 2 {
+        if !self.allow_network.load(Ordering::Relaxed) && addr.len() >= 2 {
             let family = u16::from_ne_bytes([addr[0], addr[1]]) as i32;
             if family == libc::AF_INET || family == libc::AF_INET6 {
                 return Err(SysError(Errno::PERM));
@@ -1897,12 +1937,45 @@ impl Supervisor {
             }
             libc::F_SETFD => {
                 table.set_cloexec(fd, arg as i32 & libc::FD_CLOEXEC != 0);
-                Ok(notif::reply_success(notif.id, 0))
+                // For kernel-backed files, continue so the kernel applies
+                // FD_CLOEXEC to the guest's own real fd too. CLOEXEC is per-fd
+                // (unlike the per-description status flags), so tracking it
+                // only in the virtual table would leave the guest's fd open
+                // across exec — git's child-notifier pipe then never delivers
+                // EOF and clone/fetch deadlock. Purely virtual files have no
+                // real fd at this number; reply success directly.
+                if file.backing_fd().is_some() {
+                    Ok(notif::reply_continue(notif.id))
+                } else {
+                    Ok(notif::reply_success(notif.id, 0))
+                }
             }
-            libc::F_GETFL => Ok(notif::reply_success(notif.id, file.open_flags as i64)),
+            libc::F_GETFL => {
+                // Prefer the real fd's flags so a prior F_SETFL round-trips.
+                let flags = match file.backing_fd() {
+                    // SAFETY: F_GETFL on an owned backing fd.
+                    Some(bfd) => match unsafe { libc::fcntl(bfd, libc::F_GETFL) } {
+                        v if v >= 0 => v,
+                        _ => file.open_flags,
+                    },
+                    None => file.open_flags,
+                };
+                Ok(notif::reply_success(notif.id, flags as i64))
+            }
             libc::F_SETFL => {
-                // Accept but only track; the mutable flag bits don't affect our
-                // overlay semantics for now.
+                // Apply the mutable status flags to the real backing fd when
+                // there is one. O_NONBLOCK in particular must land: c-ares
+                // (libcurl/git-remote-http) flips it on its DNS socket after
+                // creation, and recv_blocking consults the real fd's flag — a
+                // swallowed F_SETFL turns curl's expected EAGAIN into a
+                // park-forever blocking recv. Virtual-only files just accept.
+                if let Some(bfd) = file.backing_fd() {
+                    // SAFETY: F_SETFL on an owned backing fd, guest-given flags.
+                    let rc = unsafe { libc::fcntl(bfd, libc::F_SETFL, arg as libc::c_int) };
+                    if rc < 0 {
+                        return Err(SysError(Errno::INVAL));
+                    }
+                }
                 Ok(notif::reply_success(notif.id, 0))
             }
             // Advisory locking / ownership / signal commands: stubbed to success.
@@ -2159,6 +2232,15 @@ impl Supervisor {
             BackendType::Tmp => Some(state.overlay.resolve_tmp(&normalized)?),
         };
 
+        // Apply CLOEXEC to the virtual table now: the kernel closes the guest's
+        // CLOEXEC fds during the continued execve, and the supervisor must drop
+        // its dups too or pipe readers never see EOF (git's child-notifier pipe,
+        // posix_spawn error pipes). If the exec fails the guest keeps fds the
+        // table forgot — a benign under-tracking on a rare path.
+        if let Some(table) = state.fd_table(caller, procinfo) {
+            table.remove_cloexec();
+        }
+
         if let Some(target) = overlay_path {
             let short = state.symlinks.create(&target, original_len)?;
             drop(state);
@@ -2169,12 +2251,28 @@ impl Supervisor {
 
     /// clone/clone3 → snapshot the caller's fd table + cwd at fork time so a
     /// lazily discovered child inherits fork-time state, then continue.
+    /// CLONE_THREAD clones share the parent's table and never consume a
+    /// snapshot, so taking one would leak its dup'd fds for the thread's
+    /// lifetime (fd exhaustion + pipe ends that never deliver EOF).
     fn sys_clone(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
         let caller = notif.pid as i32;
+        let nr = notif.data.nr as i64;
+        let thread_bit = libc::CLONE_THREAD as u64;
+        let is_thread = if nr == libc::SYS_clone {
+            notif.data.args[0] & thread_bit != 0
+        } else {
+            // clone3: struct clone_args starts with u64 flags.
+            self.mem
+                .read_val::<u64>(caller, notif.data.args[0])
+                .map(|f| f & thread_bit != 0)
+                .unwrap_or(false)
+        };
         let mut state = self.state.lock().unwrap();
         let procinfo = &*self.procinfo;
         state.threads.get_or_sync(caller, procinfo);
-        state.threads.snapshot_fork(caller);
+        if !is_thread {
+            state.threads.snapshot_fork(caller);
+        }
         Ok(notif::reply_continue(notif.id))
     }
 

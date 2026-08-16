@@ -85,13 +85,18 @@ impl Cvisor for Grpc {
         &self,
         req: Request<pb::CreateSandboxRequest>,
     ) -> Result<Response<pb::Sandbox>, Status> {
-        let name = req.into_inner().name;
+        let r = req.into_inner();
+        let (name, repo_url) = (r.name, r.repo_url);
         let reg = self.reg.clone();
         let info = tokio::task::spawn_blocking(move || {
-            reg.create_sandbox((!name.is_empty()).then_some(name.as_str()))
+            reg.create_sandbox_with_repo(
+                (!name.is_empty()).then_some(name.as_str()),
+                (!repo_url.is_empty()).then_some(repo_url.as_str()),
+            )
         })
         .await
-        .map_err(|e| Status::internal(format!("task join: {e}")))?;
+        .map_err(|e| Status::internal(format!("task join: {e}")))?
+        .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(sandbox_to(info)))
     }
 

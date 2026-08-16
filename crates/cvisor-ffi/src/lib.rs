@@ -152,6 +152,33 @@ mod imp {
         }
     }
 
+    /// Seed the host's git identity (~/.gitconfig, ~/.ssh) into the sandbox
+    /// and, when `url` is non-NULL/non-empty, `git clone` it inside the sandbox
+    /// at `/`. Blocks until the clone finishes. Returns 0 on success, nonzero
+    /// on failure (the git error is printed to stderr).
+    #[no_mangle]
+    pub unsafe extern "C" fn cvisor_sandbox_clone_repo(
+        sb: *mut Sandbox,
+        url: *const c_char,
+    ) -> c_int {
+        let Some(sb) = sb.as_mut() else { return -1 };
+        cvisor_core::git::seed_git_identity(sb.uid);
+        if url.is_null() {
+            return 0;
+        }
+        // SAFETY: caller guarantees a NUL-terminated C string.
+        let Ok(url) = CStr::from_ptr(url).to_str() else {
+            return -1;
+        };
+        match cvisor_core::git::clone_repo(sb.uid, url) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("cvisor: clone failed: {e}");
+                1
+            }
+        }
+    }
+
     /// Run `cmd` in the sandbox, blocking until it exits. Returns a heap Output
     /// holding the captured stdout/stderr, or NULL on error.
     #[no_mangle]

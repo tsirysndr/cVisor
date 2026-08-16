@@ -951,6 +951,8 @@ dependencies = [
  "libc",
  "open",
  "rust-embed",
+ "serde",
+ "serde_json",
  "tiny_http",
  "tokio",
  "tokio-stream",

@@ -107,6 +107,41 @@ impl FdTable {
         self.open_files.contains_key(&vfd)
     }
 
+    /// Drop every tracked fd in `[first, last]` (close_range). Returns how many
+    /// entries were removed.
+    pub fn remove_range(&mut self, first: VirtualFd, last: VirtualFd) -> usize {
+        let doomed: Vec<VirtualFd> = self
+            .open_files
+            .keys()
+            .copied()
+            .filter(|&fd| fd >= first && fd <= last)
+            .collect();
+        for fd in &doomed {
+            self.open_files.remove(fd);
+        }
+        doomed.len()
+    }
+
+    /// Drop every CLOEXEC-marked entry (applied at execve). Dropping the
+    /// entries releases the supervisor's dups of their backing fds, so e.g. a
+    /// CLOEXEC pipe write-end actually reaches EOF for its reader once the
+    /// kernel closes the guest's copy at exec.
+    pub fn remove_cloexec(&mut self) -> usize {
+        let before = self.open_files.len();
+        self.open_files.retain(|_, entry| !entry.cloexec);
+        before - self.open_files.len()
+    }
+
+    /// Set CLOEXEC on every tracked fd in `[first, last]`
+    /// (close_range CLOSE_RANGE_CLOEXEC).
+    pub fn set_cloexec_range(&mut self, first: VirtualFd, last: VirtualFd) {
+        for (fd, entry) in self.open_files.iter_mut() {
+            if *fd >= first && *fd <= last {
+                entry.cloexec = true;
+            }
+        }
+    }
+
     /// Remove the entry (drops the table's Arc; the file closes on last ref).
     pub fn remove(&mut self, vfd: VirtualFd) -> bool {
         self.open_files.remove(&vfd).is_some()

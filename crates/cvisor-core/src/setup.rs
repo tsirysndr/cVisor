@@ -172,12 +172,35 @@ fn build_envp(extra: &[(String, String)]) -> SysResult<Vec<CString>> {
         .collect()
 }
 
+/// Raise the supervisor process's RLIMIT_NOFILE soft limit to the hard cap,
+/// once. The supervisor holds several kernel fds per tracked guest file
+/// (originals plus fork-snapshot dups), so an inherited 1024 soft limit
+/// exhausts fast — guest eventfd/pipe/socket creation then fails with EMFILE,
+/// which crashes event-loop runtimes (Bun, libuv, tokio) at startup.
+fn raise_fd_limit() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let mut rl = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: get/setrlimit with a valid rlimit struct.
+        unsafe {
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 && rl.rlim_cur < rl.rlim_max {
+                rl.rlim_cur = rl.rlim_max;
+                let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &rl);
+            }
+        }
+    });
+}
+
 fn fork_guest(
     uid: [u8; 16],
     argv: &[String],
     tty_slave: Option<RawFd>,
     extra_env: &[(String, String)],
 ) -> SysResult<Guest> {
+    raise_fd_limit();
     // Build EVERYTHING that allocates before fork(). In a multithreaded process
     // (the Node SDK, the test harness) another thread may hold the malloc lock
     // at fork time; the child inherits it locked, so any allocation in the child
@@ -236,6 +259,18 @@ fn fork_guest(
             // from a concurrently running session would be found first, attaching
             // the new supervisor to the wrong guest.
             libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 0u32);
+            // Cap the soft RLIMIT_NOFILE: containers often set it to ~1M, and
+            // runtimes without close_range brute-force close(0..soft-limit)
+            // before exec — a million supervised round-trips. 64k keeps such
+            // loops to a few seconds while leaving plenty of fds.
+            let mut rl = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 && rl.rlim_cur > 65536 {
+                rl.rlim_cur = 65536;
+                libc::setrlimit(libc::RLIMIT_NOFILE, &rl);
+            }
         }
         match filter::install() {
             Ok(fd) => std::mem::forget(fd),
@@ -410,6 +445,10 @@ pub struct Session {
     exit: Arc<Mutex<Option<i32>>>,
     supervisor_join: Mutex<Option<JoinHandle<()>>>,
     reader_join: Mutex<Option<JoinHandle<()>>>,
+    // Held so `configure` can retarget a live session: flip the supervisor's
+    // network policy, rewrite (or create) the guest's cgroup limits.
+    supervisor: Arc<Supervisor>,
+    cgroup: Mutex<Option<crate::cgroup::Cgroup>>,
 }
 
 /// Start a sandboxed `argv` in the background. With a PTY mode, the guest runs
@@ -462,9 +501,11 @@ pub fn spawn_session(
     let exit = Arc::new(Mutex::new(None));
     let exit_thread = Arc::clone(&exit);
     let timeout = opts.timeout;
+    // The Session keeps the cgroup (so configure can rewrite it live); it is
+    // torn down when the Session drops, after the guest is reaped.
+    let supervisor_handle = Arc::clone(&supervisor);
     let supervisor_join = std::thread::spawn(move || {
         let code = run_and_reap(supervisor, child_pid, notify_fd, timeout);
-        drop(cgroup);
         *exit_thread.lock().unwrap() = Some(code);
     });
 
@@ -488,6 +529,8 @@ pub fn spawn_session(
         exit,
         supervisor_join: Mutex::new(Some(supervisor_join)),
         reader_join: Mutex::new(reader_join),
+        supervisor: supervisor_handle,
+        cgroup: Mutex::new(cgroup),
     })
 }
 
@@ -548,6 +591,35 @@ impl Session {
                 *g = other;
                 None
             }
+        }
+    }
+
+    /// Swap the network policy on the running guest; effective on its next
+    /// socket/bind/connect/listen syscall.
+    pub fn set_network_policy(&self, allow_network: bool, allow_listen: bool) {
+        self.supervisor
+            .set_network_policy(allow_network, allow_listen);
+    }
+
+    /// Apply new resource limits to the running guest: rewrite the live cgroup
+    /// files, or create + attach a cgroup if the session started without one.
+    /// (Attaching moves the session leader; already-running descendants stay
+    /// outside, but new commands it spawns are confined.)
+    pub fn update_limits(&self, limits: &crate::cgroup::Limits) {
+        let mut cg = self.cgroup.lock().unwrap();
+        match &*cg {
+            Some(c) => {
+                if let Err(e) = c.update(limits) {
+                    eprintln!("cvisor: could not update limits: {e}");
+                }
+            }
+            None if !limits.is_empty() => {
+                if let Some(c) = crate::cgroup::Cgroup::apply(&self.child_pid.to_string(), limits) {
+                    c.attach(self.child_pid);
+                    *cg = Some(c);
+                }
+            }
+            None => {}
         }
     }
 

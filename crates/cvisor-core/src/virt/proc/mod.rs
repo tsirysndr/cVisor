@@ -173,10 +173,14 @@ impl Threads {
         };
         let fd_table = self.fd_tables[&parent.fd_table_id].value.deep_clone();
         let fs_info = self.fs_infos[&parent.fs_info_id].value.clone();
-        self.fork_snapshots
-            .entry(parent_tid)
-            .or_default()
-            .push_back(ForkSnapshot { fd_table, fs_info });
+        let queue = self.fork_snapshots.entry(parent_tid).or_default();
+        queue.push_back(ForkSnapshot { fd_table, fs_info });
+        // Bound the queue: an unconsumed snapshot (a child that died before
+        // its first syscall, or a clone kind that never claims one) would
+        // otherwise pin its dup'd fds forever. Dropping the oldest closes them.
+        while queue.len() > 8 {
+            queue.pop_front();
+        }
     }
 
     /// Register a child of `parent_tid` with the given clone flags.
@@ -255,10 +259,34 @@ impl Threads {
         }
         let status = proc.status(tid).ok_or(ThreadError::NotFound)?;
         let parent_tid = status.ptid;
-        if parent_tid <= 1 && !self.map.contains_key(&parent_tid) {
-            return Err(ThreadError::NotInSandbox);
+        let parent_known = self.map.contains_key(&parent_tid)
+            || (parent_tid > 1 && self.ensure_registered(parent_tid, proc).is_ok());
+        if !parent_known {
+            // Only processes carrying our seccomp filter can notify, so this
+            // tid IS a sandbox task — its parent just exited before the tid's
+            // first syscall and the host reaper adopted it. Refusing it would
+            // hand the orphan ESRCH on every syscall forever (shared-library
+            // loads fail with "No such process", bash job control breaks).
+            // Adopt it: as a thread of its group if the leader is known, else
+            // under the init guest with a fresh table (its inherited real fds
+            // keep working untracked via reply_continue).
+            if status.tgid != tid && self.map.contains_key(&status.tgid) {
+                return self.register_child(
+                    status.tgid,
+                    tid,
+                    CloneFlags(crate::procinfo::clone::THREAD),
+                );
+            }
+            let init = self.init_tid;
+            // Don't let adoption consume a fork snapshot queued for one of
+            // init's real children.
+            let saved = self.fork_snapshots.remove(&init);
+            let r = self.register_child(init, tid, CloneFlags(0));
+            if let Some(q) = saved {
+                self.fork_snapshots.insert(init, q);
+            }
+            return r;
         }
-        self.ensure_registered(parent_tid, proc)?;
 
         // Thread of an existing group?
         let mut flags = proc.detect_clone_flags(parent_tid, tid);

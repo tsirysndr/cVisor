@@ -58,7 +58,8 @@ message Limits {
 message EnvVar { string key = 1; string value = 2; }
 
 message CreateSandboxRequest {
-  string name = 1; // optional; empty -> a random docker-style name
+  string name = 1;     // optional; empty -> a random docker-style name
+  string repo_url = 2; // optional; non-empty -> git clone it inside the sandbox
 }
 
 message Sandbox {

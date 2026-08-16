@@ -23,6 +23,8 @@ pub mod virt;
 // Kernel-facing modules: Linux only. On other hosts the crate still builds with
 // just the pure-logic modules above so they can be unit-tested natively.
 #[cfg(target_os = "linux")]
+pub mod git;
+#[cfg(target_os = "linux")]
 pub mod mem;
 #[cfg(target_os = "linux")]
 pub mod seccomp;

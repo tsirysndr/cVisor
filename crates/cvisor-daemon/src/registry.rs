@@ -179,6 +179,26 @@ impl Registry {
         }
     }
 
+    /// Create a sandbox and prepare it for work: seed the host's git identity
+    /// (global config + ssh) and, when `repo_url` is set, clone that repository
+    /// inside it. A failed clone frees the half-made sandbox and errors.
+    pub fn create_sandbox_with_repo(
+        &self,
+        name: Option<&str>,
+        repo_url: Option<&str>,
+    ) -> Result<SandboxInfo> {
+        let info = self.create_sandbox(name);
+        let uid = self.uid_of(&info.id)?;
+        cvisor_core::git::seed_git_identity(uid);
+        if let Some(url) = repo_url.filter(|u| !u.trim().is_empty()) {
+            if let Err(e) = cvisor_core::git::clone_repo(uid, url) {
+                let _ = self.free_sandbox(&info.id);
+                return Err(Error(format!("clone failed: {e}")));
+            }
+        }
+        Ok(info)
+    }
+
     /// Create a sandbox. `name` empty → a random docker-style name; a name that
     /// collides gets a numeric suffix (`nervous_einstein2`, ...).
     pub fn create_sandbox(&self, name: Option<&str>) -> SandboxInfo {
@@ -282,6 +302,23 @@ impl Registry {
     pub fn free_sandbox(&self, r: &str) -> Result<()> {
         let id = self.resolve(r)?;
         if let Some(st) = self.sandboxes.lock().unwrap().remove(&id) {
+            // Kill any live sessions (interactive shells) tied to this sandbox
+            // before removing its overlay.
+            let doomed: Vec<Arc<Session>> = {
+                let mut sessions = self.sessions.lock().unwrap();
+                let ids: Vec<String> = sessions
+                    .iter()
+                    .filter(|(_, e)| e.uid == st.uid)
+                    .map(|(sid, _)| sid.clone())
+                    .collect();
+                ids.iter()
+                    .filter_map(|sid| sessions.remove(sid))
+                    .map(|e| e.session)
+                    .collect()
+            };
+            for s in doomed {
+                s.kill();
+            }
             cleanup_overlay(&st.uid);
         }
         self.unpersist(&id);
@@ -318,7 +355,18 @@ impl Registry {
             }
         }
         let info = st.info();
+        let (uid, net, listen, new_limits) =
+            (st.uid, st.allow_network, st.allow_listen, st.limits.clone());
         self.persist(st);
+        drop(map);
+        // Push the new policy to live sessions so it takes effect immediately,
+        // not just for future sessions/runs.
+        for e in self.sessions.lock().unwrap().values() {
+            if e.uid == uid {
+                e.session.set_network_policy(net, listen);
+                e.session.update_limits(&new_limits);
+            }
+        }
         Ok(info)
     }
 
@@ -392,10 +440,16 @@ impl Registry {
     ) -> Result<(String, Arc<Session>)> {
         let (uid, opts, ephemeral) = self.exec_target(r, 0, Overrides::default())?;
         let (argv, mode) = if pty {
-            (
-                vec![interactive_shell(), "-i".to_string()],
-                PtyMode::Buffered,
-            )
+            // A PTY session runs the given command on the terminal (TUIs like
+            // AI agents), defaulting to an interactive shell.
+            if command.is_empty() {
+                (
+                    vec![interactive_shell(), "-i".to_string()],
+                    PtyMode::Buffered,
+                )
+            } else {
+                (shell_argv(command), PtyMode::Buffered)
+            }
         } else if command.is_empty() {
             return oops("a command is required for a non-PTY session");
         } else {

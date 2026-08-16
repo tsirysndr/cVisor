@@ -111,6 +111,36 @@ impl Cgroup {
         Ok(cg)
     }
 
+    /// Rewrite the limit files on a live cgroup (`configure` on a running
+    /// sandbox); a `None` field lifts that cap.
+    pub fn update(&self, limits: &Limits) -> Result<(), String> {
+        match limits.memory_max {
+            Some(bytes) => {
+                self.write("memory.max", &bytes.to_string())?;
+                let _ = self.write_soft("memory.swap.max", "0");
+            }
+            None => {
+                self.write("memory.max", "max")?;
+                let _ = self.write_soft("memory.swap.max", "max");
+            }
+        }
+        self.write(
+            "pids.max",
+            &limits
+                .pids_max
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "max".into()),
+        )?;
+        match limits.cpu_percent {
+            Some(pct) => {
+                let quota = (pct as u64) * CPU_PERIOD_US / 100;
+                self.write("cpu.max", &format!("{quota} {CPU_PERIOD_US}"))?;
+            }
+            None => self.write("cpu.max", &format!("max {CPU_PERIOD_US}"))?,
+        }
+        Ok(())
+    }
+
     fn write(&self, file: &str, val: &str) -> Result<(), String> {
         std::fs::write(self.dir.join(file), val).map_err(|e| format!("write {file}: {e}"))
     }
