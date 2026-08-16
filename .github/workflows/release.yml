@@ -72,22 +72,22 @@ jobs:
           cargo build -p cvisor-cli --bin cvisor --target ${{ matrix.target }} --release --features zstd,s3
           cargo build -p cvisor-daemon --bin cvisord --target ${{ matrix.target }} --release --features zstd,s3
 
+      # One flat tarball per platform holding both binaries, so
+      # `tar -xzf … -C /usr/local/bin` installs the pair.
       - name: Stage artifacts
         run: |
-          for name in cvisor cvisord; do
-            bin="$name-linux-${{ matrix.arch }}"
-            install -Dm755 "target/${{ matrix.target }}/release/$name" "$bin"
-            sha256sum "$bin" > "$bin.sha256"
-          done
+          tarball="cvisor-linux-${{ matrix.arch }}.tar.gz"
+          install -Dm755 target/${{ matrix.target }}/release/cvisor dist/cvisor
+          install -Dm755 target/${{ matrix.target }}/release/cvisord dist/cvisord
+          tar -czf "$tarball" -C dist cvisor cvisord
+          sha256sum "$tarball" > "$tarball.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-linux-${{ matrix.arch }}
           path: |
-            cvisor-linux-${{ matrix.arch }}
-            cvisor-linux-${{ matrix.arch }}.sha256
-            cvisord-linux-${{ matrix.arch }}
-            cvisord-linux-${{ matrix.arch }}.sha256
+            cvisor-linux-${{ matrix.arch }}.tar.gz
+            cvisor-linux-${{ matrix.arch }}.tar.gz.sha256
           if-no-files-found: error
 
   build-macos:
@@ -125,16 +125,18 @@ jobs:
 
       - name: Stage artifact
         run: |
-          bin="cvisor-darwin-aarch64"
-          install -m 755 target/aarch64-apple-darwin/release/cvisor "$bin"
-          shasum -a 256 "$bin" > "$bin.sha256"
+          tarball="cvisor-darwin-aarch64.tar.gz"
+          mkdir -p dist
+          install -m 755 target/aarch64-apple-darwin/release/cvisor dist/cvisor
+          tar -czf "$tarball" -C dist cvisor
+          shasum -a 256 "$tarball" > "$tarball.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-darwin-aarch64
           path: |
-            cvisor-darwin-aarch64
-            cvisor-darwin-aarch64.sha256
+            cvisor-darwin-aarch64.tar.gz
+            cvisor-darwin-aarch64.tar.gz.sha256
           if-no-files-found: error
 
   release:
