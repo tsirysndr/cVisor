@@ -47,7 +47,7 @@ jobs:
         with:
           version: "lab:latest"
           driver: cloud
-          endpoint: "tsiry/default"
+          endpoint: "tsiry/rockbox-builder"
           install: true
 
       - name: Log in to GHCR
