@@ -42,6 +42,7 @@ const GROUPS: { heading: string; items: { keys: string[]; label: string }[] }[] 
       heading: "Sandbox",
       items: [
         { keys: ["c"], label: "New sandbox" },
+        { keys: ["f"], label: "Filter sandboxes" },
         { keys: ["t"], label: "Open terminal (selected)" },
         { keys: ["s"], label: "Snapshot (selected)" },
         { keys: ["b"], label: "Branch from a snapshot" },
@@ -54,7 +55,7 @@ export function HelpModal() {
   const [open, setOpen] = useAtom(helpOpenAtom);
 
   return (
-    <Modal isOpen={open} onOpenChange={setOpen} backdrop="blur" size="lg">
+    <Modal isOpen={open} onOpenChange={setOpen} classNames={{ backdrop: "bg-black/60" }} size="lg">
       <ModalContent>
         <ModalHeader className="flex items-center gap-2">
           <span className="text-primary drop-shadow-[0_0_6px_rgba(255,42,109,0.8)]">

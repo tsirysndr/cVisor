@@ -67,7 +67,8 @@ export interface Transport {
 
   health(): Promise<Health>;
   listSandboxes(): Promise<Sandbox[]>;
-  createSandbox(name?: string | null): Promise<Sandbox>;
+  // repoUrl: optional git URL cloned inside the sandbox during creation.
+  createSandbox(name?: string | null, repoUrl?: string | null): Promise<Sandbox>;
   freeSandbox(id: string): Promise<void>;
   configure(input: ConfigureInput): Promise<Sandbox>;
   run(vars: RunVars): Promise<RunResult>;
@@ -100,8 +101,19 @@ export interface Transport {
   cacheRemove(key: string, backend?: string, format?: string): Promise<boolean>;
   cacheClear(backend?: string): Promise<number>;
 
+  // `command` empty/omitted -> an interactive shell; otherwise that command
+  // runs on the PTY (e.g. an AI agent TUI).
   openTerminal(
     sandboxId: string,
+    onOutput: (data: Uint8Array) => void,
+    onExit?: (code: number) => void,
+    command?: string,
+  ): Promise<TerminalSession>;
+
+  // A PTY on the machine running the app itself (desktop only): the agent
+  // panel's "host" mode, where CLIs can use local skills to drive sandboxes.
+  openHostTerminal(
+    command: string,
     onOutput: (data: Uint8Array) => void,
     onExit?: (code: number) => void,
   ): Promise<TerminalSession>;

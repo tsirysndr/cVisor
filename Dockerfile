@@ -70,6 +70,28 @@ RUN apk add --no-cache \
       gleam
 # uv isn't packaged for Alpine; copy the static musl binaries from its image.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# AI coding agents: claude, codex, gemini, opencode, kilo ship as npm CLIs. (amp is
+# glibc-only — its native binary aborts even under gcompat — so it is only in
+# the Debian/Ubuntu images.) libgcc/libstdc++ + a system ripgrep cover the
+# glibc-linked helpers (USE_BUILTIN_RIPGREP=0 points claude at the system rg).
+ENV USE_BUILTIN_RIPGREP=0
+RUN apk add --no-cache nodejs npm libgcc libstdc++ ripgrep \
+    && npm install -g --no-fund --no-audit \
+      @anthropic-ai/claude-code \
+      @openai/codex \
+      @google/gemini-cli \
+      opencode-ai \
+      @kilocode/cli \
+    && npm cache clean --force
+# Kiro CLI is not on npm; its release zip has musl builds that run on Alpine.
+RUN apk add --no-cache unzip \
+    && curl -fsSL "https://prod.download.cli.kiro.dev/stable/latest/kirocli-$(uname -m)-linux-musl.zip" \
+      -o /tmp/kirocli.zip \
+    && unzip -q /tmp/kirocli.zip -d /tmp \
+    && install -m755 /tmp/kirocli/bin/kiro-cli /tmp/kirocli/bin/kiro-cli-chat \
+      /tmp/kirocli/bin/kiro-cli-term /usr/local/bin/ \
+    && rm -rf /tmp/kirocli /tmp/kirocli.zip \
+    && apk del unzip
 COPY --from=build /src/target/release/cvisor /usr/local/bin/cvisor
 COPY --from=build /src/target/release/cvisord /usr/local/bin/cvisord
 # gRPC and GraphQL, respectively (the daemon binds 0.0.0.0 by default).

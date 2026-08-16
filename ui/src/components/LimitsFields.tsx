@@ -1,6 +1,7 @@
 import { Input } from "@heroui/react";
 import type { Limits } from "../transport";
 import { compactSize, parseSize } from "../lib/format";
+import { plainTextField } from "../lib/inputProps";
 
 // The three resource-limit inputs shared by the create and settings modals.
 // All fields are free-text and optional; empty = unlimited.
@@ -58,7 +59,7 @@ export function LimitsFields({
 
   return (
     <div className="grid grid-cols-3 gap-2">
-      <Input
+      <Input {...plainTextField}
         label="CPU %"
         variant="bordered"
         radius="sm"
@@ -68,7 +69,7 @@ export function LimitsFields({
         value={values.cpuPercent}
         onValueChange={set("cpuPercent")}
       />
-      <Input
+      <Input {...plainTextField}
         label="Memory"
         variant="bordered"
         radius="sm"
@@ -78,7 +79,7 @@ export function LimitsFields({
         value={values.memoryMax}
         onValueChange={set("memoryMax")}
       />
-      <Input
+      <Input {...plainTextField}
         label="Max procs"
         variant="bordered"
         radius="sm"

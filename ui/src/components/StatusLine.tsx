@@ -59,7 +59,9 @@ export function StatusLine() {
       </span>
       {/* ruler: cursor position in the active list, like nvim's line:col */}
       <span className="bg-primary px-3 font-bold text-primary-foreground">
-        {total > 0 ? `${Math.min(cursor + 1, total)}:${total}` : "–:–"}
+        {total > 0
+          ? `${Math.min(Math.max(cursor + 1, 1), total)}:${total}`
+          : "–:–"}
       </span>
     </footer>
   );

@@ -565,6 +565,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "cvisor-proto",
+ "libc",
  "prost",
  "serde",
  "serde_json",

@@ -7,13 +7,17 @@ import {
   IconLayoutSidebarFilled,
   IconMoon,
   IconPlus,
+  IconLayoutSidebarRight,
+  IconLayoutSidebarRightFilled,
   IconSearch,
   IconSettings,
   IconSun,
 } from "@tabler/icons-react";
 import { useHealth } from "../hooks/useHealth";
+import { useEnsureSandbox } from "../hooks/useSandboxes";
 import { isMac, isTauri } from "../transport";
 import {
+  agentPanelVisibleAtom,
   createModalOpenAtom,
   paletteOpenAtom,
   settingsOpenAtom,
@@ -30,7 +34,17 @@ export function TopBar() {
   const [theme, setTheme] = useAtom(themeAtom);
   const [sidebar, setSidebar] = useAtom(sidebarVisibleAtom);
   const [panel, setPanel] = useAtom(terminalPanelVisibleAtom);
+  const [agent, setAgent] = useAtom(agentPanelVisibleAtom);
+  const ensureSandbox = useEnsureSandbox();
   const setPaletteOpen = useSetAtom(paletteOpenAtom);
+
+  // Opening a panel with no sandbox yet creates one on the fly.
+  const openPanel = (set: (v: boolean) => void, open: boolean) => {
+    if (!open) return set(false);
+    void ensureSandbox().then((id) => {
+      if (id) set(true);
+    });
+  };
   const setSettingsOpen = useSetAtom(settingsOpenAtom);
   const setCreateOpen = useSetAtom(createModalOpenAtom);
 
@@ -79,12 +93,29 @@ export function TopBar() {
             radius="sm"
             aria-label="Toggle terminal panel"
             className="text-default-500 data-[hover=true]:text-secondary"
-            onPress={() => setPanel((p) => !p)}
+            onPress={() => openPanel(setPanel, !panel)}
           >
             {panel ? (
               <IconLayoutBottombarFilled size={18} />
             ) : (
               <IconLayoutBottombar size={18} />
+            )}
+          </Button>
+        </Tooltip>
+        <Tooltip content={agent ? "Hide AI agent" : "Show AI agent"}>
+          <Button
+            isIconOnly
+            size="sm"
+            variant="light"
+            radius="sm"
+            aria-label="Toggle AI agent panel"
+            className="text-default-500 data-[hover=true]:text-secondary"
+            onPress={() => openPanel(setAgent, !agent)}
+          >
+            {agent ? (
+              <IconLayoutSidebarRightFilled size={18} />
+            ) : (
+              <IconLayoutSidebarRight size={18} />
             )}
           </Button>
         </Tooltip>

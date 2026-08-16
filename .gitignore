@@ -34,3 +34,6 @@ ui/dist/*.map
 ui/dist/fonts/
 ui/src-tauri/target/
 ui/src-tauri/gen/
+
+# scratch e2e scripts
+ui/*.tmp.ts

@@ -40,8 +40,11 @@ export function tauriTransport(): Transport {
 
     listSandboxes: () => invoke<Sandbox[]>("list_sandboxes"),
 
-    createSandbox: (name) =>
-      invoke<Sandbox>("create_sandbox", { name: name ?? null }),
+    createSandbox: (name, repoUrl) =>
+      invoke<Sandbox>("create_sandbox", {
+        name: name ?? null,
+        repoUrl: repoUrl ?? null,
+      }),
 
     freeSandbox: async (id) => {
       await invoke("free_sandbox", { id });
@@ -120,7 +123,67 @@ export function tauriTransport(): Transport {
     cacheClear: (backend) =>
       invoke<number>("cache_clear", { backend: backend ?? null }),
 
-    async openTerminal(sandboxId, onOutput, onExit): Promise<TerminalSession> {
+    // Host-mode PTY: same shell-output/shell-exit events as the sandbox shell
+    // (distinct `h<N>` session ids), driven by the host_shell_* commands.
+    async openHostTerminal(command, onOutput, onExit): Promise<TerminalSession> {
+      let sessionId: string | null = null;
+      const pendingOutput: { sessionId: string; base64: string }[] = [];
+      const pendingExit: { sessionId: string; code: number }[] = [];
+
+      const unlisten: UnlistenFn[] = [];
+      unlisten.push(
+        await listen<{ sessionId: string; base64: string }>(
+          "shell-output",
+          (e) => {
+            if (sessionId === null) pendingOutput.push(e.payload);
+            else if (e.payload.sessionId === sessionId)
+              onOutput(b64ToBytes(e.payload.base64));
+          },
+        ),
+      );
+      unlisten.push(
+        await listen<{ sessionId: string; code: number }>("shell-exit", (e) => {
+          if (sessionId === null) pendingExit.push(e.payload);
+          else if (e.payload.sessionId === sessionId) onExit?.(e.payload.code);
+        }),
+      );
+
+      try {
+        sessionId = await invoke<string>("host_shell_open", { command });
+      } catch (e) {
+        unlisten.forEach((fn) => fn());
+        throw e;
+      }
+      for (const p of pendingOutput)
+        if (p.sessionId === sessionId) onOutput(b64ToBytes(p.base64));
+      for (const p of pendingExit)
+        if (p.sessionId === sessionId) onExit?.(p.code);
+      pendingOutput.length = 0;
+      pendingExit.length = 0;
+
+      return {
+        write: (data) => {
+          void invoke("host_shell_write", {
+            sessionId,
+            base64: bytesToB64(data),
+          });
+        },
+        resize: (rows, cols) => {
+          void invoke("host_shell_resize", { sessionId, rows, cols });
+        },
+        close: () => {
+          unlisten.forEach((fn) => fn());
+          void invoke("host_shell_close", { sessionId });
+        },
+      };
+    },
+
+    async openTerminal(
+      sandboxId,
+      onOutput,
+      onExit,
+      command,
+    ): Promise<TerminalSession> {
       // Attach the listeners before shell_open: the daemon starts streaming as
       // soon as the command runs, and events emitted while the invoke promise
       // resolves (typically the shell prompt) would otherwise be lost. Until
@@ -151,7 +214,10 @@ export function tauriTransport(): Transport {
       );
 
       try {
-        sessionId = await invoke<string>("shell_open", { sandboxId });
+        sessionId = await invoke<string>("shell_open", {
+          sandboxId,
+          command: command ?? "",
+        });
       } catch (e) {
         unlisten.forEach((fn) => fn());
         throw e;

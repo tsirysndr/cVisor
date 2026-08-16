@@ -14,6 +14,7 @@ import { runModalOpenAtom, selectedSandboxAtom } from "../state/atoms";
 import { useRun } from "../hooks/useRun";
 import { PrimaryButton, TextButton } from "./Buttons";
 import { OutputSkeleton } from "./Skeletons";
+import { plainTextField } from "../lib/inputProps";
 
 const schema = z.object({
   command: z.string().min(1, "Enter a command"),
@@ -50,7 +51,7 @@ export function RunCommandModal() {
     <Modal
       isOpen={open}
       onOpenChange={setOpen}
-      backdrop="blur"
+      classNames={{ backdrop: "bg-black/60" }}
       size="2xl"
       scrollBehavior="inside"
     >
@@ -63,7 +64,7 @@ export function RunCommandModal() {
         </ModalHeader>
         <ModalBody className="gap-4">
           <form onSubmit={onSubmit} className="flex items-end gap-2">
-            <Input
+            <Input {...plainTextField}
               {...register("command")}
               autoFocus
               label="Command"
@@ -74,7 +75,7 @@ export function RunCommandModal() {
               errorMessage={errors.command?.message}
               className="flex-1"
             />
-            <Input
+            <Input {...plainTextField}
               {...register("timeoutMs")}
               label="Timeout (ms)"
               type="number"

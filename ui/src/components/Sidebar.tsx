@@ -59,7 +59,7 @@ export function Sidebar() {
               <span className="flex-1 text-left font-medium">{it.label}</span>
               {counts[it.key] > 0 && (
                 <span
-                  className={`px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
+                  className={`rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
                     active
                       ? "bg-primary text-primary-foreground"
                       : "bg-content3 text-default-400"

@@ -16,6 +16,10 @@ export const cursorAtom = atom(0);
 // Raycast-style command palette visibility.
 export const paletteOpenAtom = atom(false);
 
+// Bumped by the `f` shortcut; the Sandboxes view focuses its filter input on
+// change.
+export const sandboxFilterFocusAtom = atom(0);
+
 // Keyboard-shortcut help modal visibility.
 export const helpOpenAtom = atom(false);
 
@@ -32,6 +36,23 @@ export const sandboxSettingsAtom = atom<string | null>(null);
 // selected sandbox back to one. `null` when closed.
 export type SnapshotPickerMode = "branch" | "rollback";
 export const snapshotPickerAtom = atom<SnapshotPickerMode | null>(null);
+
+// Terminal dock tabs: one tab per sandbox with an open terminal. Terminals for
+// every tab stay mounted so their sessions survive tab switches.
+export const terminalTabsAtom = atom<string[]>([]);
+export const activeTerminalTabAtom = atom<string | null>(null);
+
+// Right-docked AI agent panel: a PTY running one of the pre-installed agent
+// CLIs inside the selected sandbox, or (desktop only) on the host machine —
+// where the CLI can use local cvisor skills to drive sandboxes. The chosen CLI
+// and target persist.
+export const agentPanelVisibleAtom = atomWithStorage("cvisor.agentPanel", false);
+export const agentCliAtom = atomWithStorage("cvisor.agentCli", "claude");
+export const agentTargetAtom = atomWithStorage<"sandbox" | "host">(
+  "cvisor.agentTarget",
+  "sandbox",
+);
+export const agentFullscreenAtom = atom(false);
 
 // Layout: left sidebar + bottom-docked terminal panel. Visibility + panel
 // height persist across reloads; fullscreen is transient.

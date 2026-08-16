@@ -13,6 +13,7 @@ import {
 import { isTauri } from "../transport";
 import { checkConnection } from "../lib/checkConnection";
 import { PrimaryButton, TextButton } from "./Buttons";
+import { plainTextField } from "../lib/inputProps";
 
 const schema = z.object({
   graphqlUrl: z.string().url("Enter a valid URL"),
@@ -74,7 +75,7 @@ export function ConfigForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <Input
+      <Input {...plainTextField}
         {...register("graphqlUrl")}
         label={desktop ? "Daemon gRPC URL" : "GraphQL URL"}
         variant="bordered"
@@ -86,7 +87,7 @@ export function ConfigForm({
         errorMessage={errors.graphqlUrl?.message}
       />
       {!desktop && (
-        <Input
+        <Input {...plainTextField}
           {...register("wsUrl", { onChange: () => (wsEdited.current = true) })}
           label="WebSocket URL"
           variant="bordered"
@@ -96,7 +97,7 @@ export function ConfigForm({
           errorMessage={errors.wsUrl?.message}
         />
       )}
-      <Input
+      <Input {...plainTextField}
         {...register("token")}
         label="Token"
         type="password"

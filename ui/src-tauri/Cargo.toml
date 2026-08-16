@@ -23,6 +23,8 @@ prost = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 tokio-stream = "0.1"
 base64 = "0.22"
+# host PTY sessions (agent panel host mode)
+libc = "0.2"
 
 [features]
 # used by tauri to enable custom-protocol in release builds

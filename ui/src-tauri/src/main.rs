@@ -28,6 +28,7 @@ use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 use tonic::{Request, Status};
 
+mod hostpty;
 mod tray;
 
 /// The daemon gRPC address + bearer token, set from the frontend via `set_config`.
@@ -149,22 +150,59 @@ struct RunResultDto {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ShellOutputPayload {
-    session_id: String,
-    base64: String,
+pub(crate) struct ShellOutputPayload {
+    pub(crate) session_id: String,
+    pub(crate) base64: String,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ShellExitPayload {
-    session_id: String,
-    code: i32,
+pub(crate) struct ShellExitPayload {
+    pub(crate) session_id: String,
+    pub(crate) code: i32,
 }
 
 /// Update the menu-bar tray status line (called by the frontend on probe).
 #[tauri::command]
 fn set_tray_status(app: AppHandle, ok: bool, detail: String) {
     tray::set_status(&app, ok, &detail);
+}
+
+/// bsdkrun microVM settings (macOS): stored in `~/.cvisor/sandbox.json`, read
+/// by the cvisor CLI when it provisions the `cvisor-sandbox` microVM (each
+/// CVISOR_SANDBOX_* env var still overrides its field).
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct VmSettings {
+    image: Option<String>,
+    tag: Option<String>,
+    cpus: Option<u32>,
+    mem_mib: Option<u32>,
+    disk: Option<String>,
+}
+
+fn vm_settings_path() -> Result<std::path::PathBuf, String> {
+    let home = std::env::var_os("HOME").ok_or("no HOME directory")?;
+    Ok(std::path::PathBuf::from(home).join(".cvisor").join("sandbox.json"))
+}
+
+#[tauri::command]
+fn vm_settings_get() -> Result<VmSettings, String> {
+    let path = vm_settings_path()?;
+    match std::fs::read_to_string(path) {
+        Ok(s) => serde_json::from_str(&s).map_err(|e| e.to_string()),
+        Err(_) => Ok(VmSettings::default()),
+    }
+}
+
+#[tauri::command]
+fn vm_settings_set(settings: VmSettings) -> Result<(), String> {
+    let path = vm_settings_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -204,11 +242,13 @@ async fn list_sandboxes(state: State<'_, AppState>) -> Result<Vec<SandboxDto>, S
 async fn create_sandbox(
     state: State<'_, AppState>,
     name: Option<String>,
+    repo_url: Option<String>,
 ) -> Result<SandboxDto, String> {
     let mut client = client(&state).await?;
     let s = client
         .create_sandbox(CreateSandboxRequest {
             name: name.unwrap_or_default(),
+            repo_url: repo_url.unwrap_or_default(),
         })
         .await
         .map_err(|e| e.to_string())?
@@ -512,13 +552,14 @@ async fn shell_open(
     app: AppHandle,
     state: State<'_, AppState>,
     sandbox_id: String,
+    command: Option<String>,
 ) -> Result<String, String> {
     let mut client = client(&state).await?;
     let (tx, rx) = mpsc::channel::<ShellInput>(64);
     tx.send(ShellInput {
         kind: Some(shell_input::Kind::Start(ShellStart {
             id: sandbox_id,
-            command: String::new(),
+            command: command.unwrap_or_default(),
             pty: true,
         })),
     })
@@ -632,6 +673,7 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState::default())
         .manage(tray::TrayStatus::default())
+        .manage(hostpty::HostShells::default())
         .setup(|app| {
             // macOS-style system tray (Docker-Desktop-like).
             tray::install(app.handle())?;
@@ -650,6 +692,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             set_tray_status,
+            vm_settings_get,
+            vm_settings_set,
             set_config,
             health,
             list_sandboxes,
@@ -673,7 +717,11 @@ fn main() {
             shell_open,
             shell_write,
             shell_resize,
-            shell_close
+            shell_close,
+            hostpty::host_shell_open,
+            hostpty::host_shell_write,
+            hostpty::host_shell_resize,
+            hostpty::host_shell_close
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

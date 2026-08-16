@@ -6,6 +6,7 @@ import {
   helpOpenAtom,
   paletteOpenAtom,
   runModalOpenAtom,
+  sandboxFilterFocusAtom,
   sandboxSettingsAtom,
   selectedSandboxAtom,
   settingsOpenAtom,
@@ -15,7 +16,7 @@ import {
   themeAtom,
   viewAtom,
 } from "../state/atoms";
-import { useBranch } from "./useSandboxes";
+import { useBranch, useEnsureSandbox } from "./useSandboxes";
 import { useSnapshot } from "./useSnapshots";
 import {
   useInfiniteCaches,
@@ -66,9 +67,12 @@ export function useShortcuts() {
   const caches = useInfiniteCaches();
   const branch = useBranch();
   const snapshot = useSnapshot();
+  const ensureSandbox = useEnsureSandbox();
+  const setFilterFocus = useSetAtom(sandboxFilterFocusAtom);
 
-  // Reset the cursor to the top whenever the active view changes.
-  useEffect(() => setCursor(0), [view, setCursor]);
+  // Park the cursor (-1: nothing highlighted) whenever the active view
+  // changes; the first ArrowDown moves it to the top row.
+  useEffect(() => setCursor(-1), [view, setCursor]);
 
   const active =
     view === "sandboxes"
@@ -142,7 +146,11 @@ export function useShortcuts() {
       }
       if (mod && key === "j") {
         e.preventDefault();
-        setPanel((p) => !p);
+        setPanel((p) => {
+          // Opening with no sandbox yet creates one on the fly.
+          if (!p) void ensureSandbox();
+          return !p;
+        });
         return;
       }
       if (mod) return;
@@ -169,6 +177,8 @@ export function useShortcuts() {
           move(-1);
           break;
         case "Enter":
+          // A focused button (e.g. a sidebar item) owns its own Enter.
+          if ((e.target as HTMLElement | null)?.tagName === "BUTTON") break;
           e.preventDefault();
           activate();
           break;
@@ -189,6 +199,12 @@ export function useShortcuts() {
           break;
         case "d":
           setTheme((t) => (t === "dark" ? "light" : "dark"));
+          break;
+        case "f":
+          if (view === "sandboxes") {
+            e.preventDefault();
+            setFilterFocus((n) => n + 1);
+          }
           break;
         default:
           break;
@@ -214,8 +230,10 @@ export function useShortcuts() {
     setSelected,
     setSidebar,
     setCursor,
+    setFilterFocus,
     setTheme,
     setView,
+    ensureSandbox,
     snapshot,
     view,
   ]);

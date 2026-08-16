@@ -31,6 +31,7 @@ import {
 } from "../state/atoms";
 import { useFreeSandbox, useSandboxes } from "../hooks/useSandboxes";
 import { useSnapshot } from "../hooks/useSnapshots";
+import { plainTextField } from "../lib/inputProps";
 
 // Raycast-style palette (opened by "/" or Cmd/Ctrl-K). cmdk handles fuzzy
 // filtering + arrow-key nav; we own the overlay, backdrop, and Escape.
@@ -77,7 +78,7 @@ export function CommandPalette() {
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-lg overflow-hidden rounded-large border border-content3 bg-content1 shadow-[0_0_30px_rgba(255,42,109,0.15)]"
       >
-        <Command.Input
+        <Command.Input {...plainTextField}
           autoFocus
           placeholder="Type a command or search…"
           className="w-full border-b border-content3 bg-transparent px-4 py-3 text-sm text-foreground outline-none placeholder:text-default-400"

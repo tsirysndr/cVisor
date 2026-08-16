@@ -67,10 +67,11 @@ export function webTransport(): Transport {
         .sandboxes;
     },
 
-    async createSandbox(name) {
+    async createSandbox(name, repoUrl) {
       return (
         await graphQLRequest<{ createSandbox: Sandbox }>(CREATE_SANDBOX, {
           name: name || null,
+          repoUrl: repoUrl || null,
         })
       ).createSandbox;
     },
@@ -196,10 +197,19 @@ export function webTransport(): Transport {
       ).cacheClear;
     },
 
-    async openTerminal(sandboxId, onOutput, onExit): Promise<TerminalSession> {
+    async openHostTerminal(): Promise<TerminalSession> {
+      throw new Error("host terminals require the desktop app");
+    },
+
+    async openTerminal(
+      sandboxId,
+      onOutput,
+      onExit,
+      command,
+    ): Promise<TerminalSession> {
       const d = await graphQLRequest<{ startSession: { id: string } }>(
         START_SESSION,
-        { id: sandboxId, command: "", pty: true },
+        { id: sandboxId, command: command ?? "", pty: true },
       );
       const sessionId = d.startSession.id;
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Input, Tooltip } from "@heroui/react";
-import { useAtom, useSetAtom } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   IconAdjustmentsHorizontal,
   IconCamera,
@@ -13,6 +13,7 @@ import {
 import {
   cursorAtom,
   runModalOpenAtom,
+  sandboxFilterFocusAtom,
   sandboxSettingsAtom,
   selectedSandboxAtom,
   terminalPanelVisibleAtom,
@@ -25,6 +26,7 @@ import {
 } from "../../hooks/useInfinitePaged";
 import { LoadingMoreRow, SandboxListSkeleton } from "../Skeletons";
 import { ViewShell } from "./ViewShell";
+import { plainTextField } from "../../lib/inputProps";
 
 export function SandboxesView() {
   const {
@@ -48,6 +50,13 @@ export function SandboxesView() {
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
+
+  // `f` shortcut: focus the quick filter.
+  const filterRef = useRef<HTMLInputElement>(null);
+  const filterFocus = useAtomValue(sandboxFilterFocusAtom);
+  useEffect(() => {
+    if (filterFocus > 0) filterRef.current?.focus();
+  }, [filterFocus]);
 
   const sentinelRef = useInfiniteScroll({
     hasNextPage: !!hasNextPage,
@@ -79,13 +88,14 @@ export function SandboxesView() {
     <ViewShell
       title="Sandboxes"
       action={
-        <Input
+        <Input {...plainTextField}
+          ref={filterRef}
           size="sm"
           variant="bordered"
           radius="sm"
           className="w-56"
           aria-label="Filter sandboxes"
-          placeholder="Filter sandboxes…"
+          placeholder="Filter sandboxes… (f)"
           startContent={<IconFilter size={14} className="text-default-400" />}
           isClearable
           value={filter}

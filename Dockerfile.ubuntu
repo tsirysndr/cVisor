@@ -60,6 +60,24 @@ RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
 # uv (+uvx) and gleam aren't in the base repos; copy their static binaries.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 COPY --from=ghcr.io/gleam-lang/gleam:v1.15.0-erlang-alpine /bin/gleam /usr/local/bin/gleam
+# AI coding agents: claude, codex, gemini, opencode, amp, kilo ship as npm CLIs.
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g --no-fund --no-audit \
+      @anthropic-ai/claude-code \
+      @openai/codex \
+      @google/gemini-cli \
+      opencode-ai \
+      @sourcegraph/amp \
+      @kilocode/cli \
+    && npm cache clean --force
+# Kiro CLI is not on npm; install its release binaries from the official zip.
+RUN curl -fsSL "https://prod.download.cli.kiro.dev/stable/latest/kirocli-$(uname -m)-linux.zip" \
+      -o /tmp/kirocli.zip \
+    && unzip -q /tmp/kirocli.zip -d /tmp \
+    && install -m755 /tmp/kirocli/bin/kiro-cli /tmp/kirocli/bin/kiro-cli-chat \
+      /tmp/kirocli/bin/kiro-cli-term /usr/local/bin/ \
+    && rm -rf /tmp/kirocli /tmp/kirocli.zip
 COPY --from=build /src/target/release/cvisor /usr/local/bin/cvisor
 COPY --from=build /src/target/release/cvisord /usr/local/bin/cvisord
 # gRPC and GraphQL, respectively (the daemon binds 0.0.0.0 by default).

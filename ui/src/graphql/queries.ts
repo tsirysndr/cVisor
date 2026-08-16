@@ -52,8 +52,8 @@ export const READ_FILE = gql`
 `;
 
 export const CREATE_SANDBOX = gql`
-  mutation CreateSandbox($name: String) {
-    createSandbox(name: $name) {
+  mutation CreateSandbox($name: String, $repoUrl: String) {
+    createSandbox(name: $name, repoUrl: $repoUrl) {
       id
       name
       allowNetwork

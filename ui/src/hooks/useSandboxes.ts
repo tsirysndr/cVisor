@@ -10,14 +10,21 @@ import {
   type Limits,
   type Sandbox,
 } from "../transport";
-import { selectedSandboxAtom } from "../state/atoms";
+import {
+  activeTerminalTabAtom,
+  selectedSandboxAtom,
+  terminalTabsAtom,
+} from "../state/atoms";
 
 const KEY = ["sandboxes"] as const;
 
-// Clear the selected-sandbox atom when the sandbox it points at goes away.
+// A freed sandbox must vanish from the UI immediately: clear the selection and
+// close its terminal tab (unmounting the tab tears down the live session).
 function clearSelectedIf(id: string) {
   const store = getDefaultStore();
   if (store.get(selectedSandboxAtom) === id) store.set(selectedSandboxAtom, null);
+  store.set(terminalTabsAtom, (t) => t.filter((tab) => tab !== id));
+  if (store.get(activeTerminalTabAtom) === id) store.set(activeTerminalTabAtom, null);
 }
 
 export function useSandboxes() {
@@ -31,17 +38,57 @@ export function useSandboxes() {
 export function useCreateSandbox() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars?: { name?: string; limits?: Limits }) => {
+    mutationFn: async (vars?: {
+      name?: string;
+      repoUrl?: string;
+      limits?: Limits;
+      allowNetwork?: boolean;
+      allowListen?: boolean;
+    }) => {
       const t = getTransport();
-      const sb = await t.createSandbox(vars?.name || null);
-      // Limits are applied via configure; create itself only takes a name.
-      if (vars?.limits && Object.keys(vars.limits).length > 0) {
-        return t.configure({ id: sb.id, limits: vars.limits });
+      const sb = await t.createSandbox(vars?.name || null, vars?.repoUrl || null);
+      // Flags and limits are applied via configure; create only takes a name.
+      // Skip the extra round-trip when everything matches the daemon defaults
+      // (network on, listen off, no limits).
+      const hasLimits = !!vars?.limits && Object.keys(vars.limits).length > 0;
+      const nonDefaultFlags =
+        vars?.allowNetwork === false || vars?.allowListen === true;
+      if (hasLimits || nonDefaultFlags) {
+        return t.configure({
+          id: sb.id,
+          allowNetwork: vars?.allowNetwork,
+          allowListen: vars?.allowListen,
+          limits: vars?.limits,
+        });
       }
       return sb;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
+}
+
+// Guarantee a selected sandbox before opening a panel that needs one: keep the
+// selection if set, else select the first existing sandbox, else create one.
+export function useEnsureSandbox() {
+  const { data: sandboxes } = useSandboxes();
+  const create = useCreateSandbox();
+  return async (): Promise<string | null> => {
+    const store = getDefaultStore();
+    const selected = store.get(selectedSandboxAtom);
+    if (selected) return selected;
+    const first = sandboxes?.[0];
+    if (first) {
+      store.set(selectedSandboxAtom, first.id);
+      return first.id;
+    }
+    try {
+      const sb = await create.mutateAsync({});
+      store.set(selectedSandboxAtom, sb.id);
+      return sb.id;
+    } catch {
+      return null;
+    }
+  };
 }
 
 export function useConfigure() {

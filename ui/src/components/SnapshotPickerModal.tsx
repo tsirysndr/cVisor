@@ -51,7 +51,7 @@ export function SnapshotPickerModal() {
     <Modal
       isOpen={mode !== null}
       onOpenChange={(o) => !o && close()}
-      backdrop="blur"
+      classNames={{ backdrop: "bg-black/60" }}
       scrollBehavior="inside"
     >
       <ModalContent>

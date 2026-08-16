@@ -8,8 +8,10 @@ import { useAtom, useSetAtom } from "jotai";
 import { useQueryClient } from "@tanstack/react-query";
 import { configAtom, isInjected } from "../config";
 import { resetWsClient } from "../graphql/ws";
+import { isMac, isTauri } from "../transport";
 import { selectedSandboxAtom, settingsOpenAtom } from "../state/atoms";
 import { ConfigForm } from "./ConfigForm";
+import { MicroVmSettings } from "./MicroVmSettings";
 
 // Re-openable connection settings. Also offers Disconnect (clears localStorage
 // and returns to the Setup screen).
@@ -49,6 +51,8 @@ export function SettingsModal() {
               onDisconnect={disconnect}
             />
           )}
+          {/* The bsdkrun microVM only exists on macOS; hidden elsewhere. */}
+          {isTauri() && isMac() && <MicroVmSettings />}
         </ModalBody>
       </ModalContent>
     </Modal>

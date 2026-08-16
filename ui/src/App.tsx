@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { configAtom, setActiveConfig } from "./config";
 import { getTransport, isMac, isTauri } from "./transport";
 import {
+  agentPanelVisibleAtom,
   sidebarVisibleAtom,
   themeAtom,
   viewAtom,
@@ -16,6 +17,7 @@ import { TopBar } from "./components/TopBar";
 import { StatusLine } from "./components/StatusLine";
 import { Sidebar } from "./components/Sidebar";
 import { TerminalPanel } from "./components/TerminalPanel";
+import { AgentPanel } from "./components/AgentPanel";
 import { SandboxesView } from "./components/views/SandboxesView";
 import { SnapshotsView } from "./components/views/SnapshotsView";
 import { CachesView } from "./components/views/CachesView";
@@ -71,18 +73,22 @@ function Workspace() {
   useShortcuts();
   useTrayStatus();
   const sidebarVisible = useAtomValue(sidebarVisibleAtom);
+  const agentVisible = useAtomValue(agentPanelVisibleAtom);
 
   return (
     <>
       <TopBar />
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1">
-          {sidebarVisible && <Sidebar />}
-          <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-            <MainContent />
-          </main>
+      <div className="relative flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1">
+            {sidebarVisible && <Sidebar />}
+            <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+              <MainContent />
+            </main>
+          </div>
+          <TerminalPanel />
         </div>
-        <TerminalPanel />
+        {agentVisible && <AgentPanel />}
       </div>
       <StatusLine />
 
