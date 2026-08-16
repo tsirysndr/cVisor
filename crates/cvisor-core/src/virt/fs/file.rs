@@ -71,6 +71,10 @@ impl File {
         self.backend.bind(addr)
     }
 
+    pub fn read_can_block(&self) -> bool {
+        self.backend.read_can_block()
+    }
+
     pub fn poll_readable(&self, timeout_ms: i32) -> SysResult<bool> {
         self.backend.poll_readable(timeout_ms)
     }

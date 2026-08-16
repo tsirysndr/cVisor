@@ -556,9 +556,31 @@ impl Supervisor {
 
         let n = count.min(IO_CHUNK);
         let mut buf = vec![0u8; n];
-        let got = file.read(&mut buf)?;
+        let got = self.read_blocking(&file, &mut buf, notif.id)?;
         self.mem.write_bytes(caller, addr, &buf[..got])?;
         Ok(notif::reply_success(notif.id, got as i64))
+    }
+
+    /// Read while keeping the wait interruptible. A plain blocking read on a
+    /// pipe/pty/device runs in a supervisor worker thread, so it outlives the
+    /// guest: killing the guest (session end, sandbox delete, timeout) leaves
+    /// the worker wedged in the kernel forever, which hangs `Supervisor::run`'s
+    /// worker join and every `Session` teardown behind it. Poll in slices and
+    /// abort with `EINTR` as soon as the guest's notification is no longer
+    /// valid (it was signalled or exited); no byte is consumed on abort.
+    fn read_blocking(&self, file: &File, buf: &mut [u8], notif_id: u64) -> SysResult<usize> {
+        use crate::error::{Errno, SysError};
+        if !file.read_can_block() {
+            return file.read(buf);
+        }
+        loop {
+            if file.poll_readable(RECV_POLL_SLICE_MS)? {
+                return file.read(buf);
+            }
+            if !self.notifier.id_valid(notif_id) {
+                return Err(SysError(Errno::INTR));
+            }
+        }
     }
 
     fn sys_write(&self, notif: &SeccompNotif) -> SysResult<SeccompNotifResp> {
@@ -1618,7 +1640,7 @@ impl Supervisor {
         };
         // One capped backend read, then scatter into the iovecs.
         let mut buf = vec![0u8; IO_CHUNK];
-        let got = file.read(&mut buf)?;
+        let got = self.read_blocking(&file, &mut buf, notif.id)?;
         let mut remaining = &buf[..got];
         let mut total = 0usize;
         for i in 0..iovcnt {

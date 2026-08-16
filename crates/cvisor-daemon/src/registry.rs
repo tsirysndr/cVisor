@@ -301,7 +301,11 @@ impl Registry {
 
     pub fn free_sandbox(&self, r: &str) -> Result<()> {
         let id = self.resolve(r)?;
-        if let Some(st) = self.sandboxes.lock().unwrap().remove(&id) {
+        // Remove under the lock, tear down outside it: dropping a Session joins
+        // its supervisor thread, and a slow/stuck join must not freeze every
+        // other registry operation.
+        let removed = self.sandboxes.lock().unwrap().remove(&id);
+        if let Some(st) = removed {
             // Kill any live sessions (interactive shells) tied to this sandbox
             // before removing its overlay.
             let doomed: Vec<Arc<Session>> = {
@@ -480,7 +484,9 @@ impl Registry {
 
     /// Drop a finished session; cleans an ephemeral sandbox's overlay.
     pub fn end_session(&self, sid: &str) {
-        if let Some(e) = self.sessions.lock().unwrap().remove(sid) {
+        // Remove under the lock, tear down outside it (see free_sandbox).
+        let removed = self.sessions.lock().unwrap().remove(sid);
+        if let Some(e) = removed {
             e.session.kill();
             if e.ephemeral {
                 cleanup_overlay(&e.uid);

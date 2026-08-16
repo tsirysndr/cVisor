@@ -291,8 +291,12 @@ impl Mutation {
 
     /// Free a sandbox and clean up its overlay.
     async fn free_sandbox(&self, ctx: &Context<'_>, id: String) -> async_graphql::Result<bool> {
-        reg(ctx)
-            .free_sandbox(&id)
+        let reg = reg(ctx);
+        // Killing sessions + removing the overlay blocks; keep it off the
+        // async workers.
+        spawn_blocking(move || reg.free_sandbox(&id))
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
             .map_err(|e| Error::new(e.to_string()))?;
         Ok(true)
     }

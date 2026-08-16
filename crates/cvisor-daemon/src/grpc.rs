@@ -220,7 +220,13 @@ impl Cvisor for Grpc {
                 }
             }
             // kill + thread joins are blocking; keep them off the async workers.
-            let _ = tokio::task::spawn_blocking(move || reg.end_session(&sid)).await;
+            // The session Arc moves in too: dropping the last Arc joins the
+            // supervisor thread, which must never pin an async worker.
+            let _ = tokio::task::spawn_blocking(move || {
+                reg.end_session(&sid);
+                drop(session);
+            })
+            .await;
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
@@ -314,7 +320,13 @@ impl Cvisor for Grpc {
                 }
             }
             // kill + thread joins are blocking; keep them off the async workers.
-            let _ = tokio::task::spawn_blocking(move || reg.end_session(&sid)).await;
+            // The session Arc moves in too: dropping the last Arc joins the
+            // supervisor thread, which must never pin an async worker.
+            let _ = tokio::task::spawn_blocking(move || {
+                reg.end_session(&sid);
+                drop(session);
+            })
+            .await;
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }

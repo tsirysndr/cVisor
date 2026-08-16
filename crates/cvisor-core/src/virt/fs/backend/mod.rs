@@ -196,8 +196,16 @@ impl Backend {
         Ok(n as usize)
     }
 
-    /// Poll the socket for readability up to `timeout_ms` (negative = block).
-    /// Returns true if it became readable / hung up / errored.
+    /// Whether a read on this backend can block indefinitely. Only passthrough
+    /// fds (pipes, ptys, sockets, devices) can; every other backend is a regular
+    /// file or in-memory content, which always completes.
+    pub fn read_can_block(&self) -> bool {
+        matches!(self, Backend::Passthrough(_))
+    }
+
+    /// Poll the backing passthrough fd for readability up to `timeout_ms`
+    /// (negative = block). Returns true if it became readable / hung up /
+    /// errored.
     pub fn poll_readable(&self, timeout_ms: i32) -> SysResult<bool> {
         let fd = self.as_socket_fd()?;
         let mut pfd = libc::pollfd {
