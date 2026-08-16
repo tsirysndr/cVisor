@@ -116,7 +116,7 @@ export function TerminalPanel() {
     e.preventDefault();
     const startY = e.clientY;
     const startH = height;
-    const maxH = window.innerHeight - 160;
+    const maxH = window.innerHeight - 220;
     const onMove = (ev: MouseEvent) => {
       const next = startH + (startY - ev.clientY);
       setHeight(Math.max(MIN_H, Math.min(maxH, next)));
@@ -135,7 +135,14 @@ export function TerminalPanel() {
 
   return (
     <div
-      style={!shown || fullscreen ? undefined : { height }}
+      // Clamp so the dock can never overflow its column (e.g. a height
+      // persisted from a larger window) and hide the terminal's bottom rows
+      // behind the status line.
+      style={
+        !shown || fullscreen
+          ? undefined
+          : { height: `min(${height}px, calc(100% - 8rem))` }
+      }
       className={
         !shown
           ? "hidden"

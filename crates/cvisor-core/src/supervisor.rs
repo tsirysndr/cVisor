@@ -475,15 +475,21 @@ impl Supervisor {
         let backing_fd = backend.backing_fd();
         let cloexec = flags & libc::O_CLOEXEC != 0;
         let file = Arc::new(File::with_path(backend, Some(normalized), flags));
-        let vfd = state
+        // Kernel-chosen guest fd == vfd (single allocator). Purely virtual
+        // files reserve their guest slot with a /dev/null placeholder so a
+        // later kernel-created fd can never take the same number.
+        let vfd = match backing_fd {
+            Some(bfd) => self.notifier.addfd_auto(notif.id, bfd, cloexec),
+            None => self.addfd_placeholder(notif.id, cloexec),
+        };
+        let table = state
             .fd_table(caller, procinfo)
-            .ok_or(SysError(Errno::SRCH))?
-            .insert(file, cloexec);
-
-        if let Some(bfd) = backing_fd {
-            // Best-effort: with no real guest (tests) this is a no-op.
-            let _ = self.notifier.addfd(notif.id, bfd, vfd, cloexec);
-        }
+            .ok_or(SysError(Errno::SRCH))?;
+        let vfd = match vfd {
+            Ok(fd) => table.insert_at(file, fd, cloexec),
+            // No live guest (tests): fall back to the table's numbering.
+            Err(_) => table.insert(file, cloexec),
+        };
         Ok(notif::reply_success(notif.id, vfd as i64))
     }
 
@@ -526,16 +532,11 @@ impl Supervisor {
             return Ok(notif::reply_continue(notif.id));
         };
         match table.get(fd) {
-            Some(file) => {
-                let has_backing = file.backing_fd().is_some();
+            Some(_) => {
                 table.remove(fd);
-                // Kernel-backed files: continue so the guest's addfd'd fd is
-                // also closed; purely virtual files reply success.
-                if has_backing {
-                    Ok(notif::reply_continue(notif.id))
-                } else {
-                    Ok(notif::reply_success(notif.id, 0))
-                }
+                // Every tracked entry has a matching guest fd (real backing or
+                // the /dev/null placeholder); continue so it closes too.
+                Ok(notif::reply_continue(notif.id))
             }
             // Not one of ours (stdio or an unknown fd): let the kernel close it.
             None => Ok(notif::reply_continue(notif.id)),
@@ -672,11 +673,16 @@ impl Supervisor {
         let Some(file) = table.get(oldfd) else {
             return Ok(notif::reply_continue(notif.id));
         };
-        let backing = file.backing_fd();
-        let newfd = table.dup(file);
-        if let Some(bfd) = backing {
-            let _ = self.notifier.addfd(notif.id, bfd, newfd, false);
-        }
+        let newfd = match file.backing_fd() {
+            Some(bfd) => match self.notifier.addfd_auto(notif.id, bfd, false) {
+                Ok(fd) => table.dup_at(file, fd, false),
+                Err(_) => table.dup(file), // no live guest (tests)
+            },
+            None => match self.addfd_placeholder(notif.id, false) {
+                Ok(fd) => table.dup_at(file, fd, false),
+                Err(_) => table.dup(file),
+            },
+        };
         Ok(notif::reply_success(notif.id, newfd as i64))
     }
 
@@ -755,12 +761,21 @@ impl Supervisor {
         let table = state
             .fd_table(caller, procinfo)
             .ok_or(SysError(Errno::SRCH))?;
-        let read_vfd = table.insert(read_file, cloexec);
-        let write_vfd = table.insert(write_file, cloexec);
+        let (read_vfd, write_vfd) = match (
+            self.notifier.addfd_auto(notif.id, fds[0], cloexec),
+            self.notifier.addfd_auto(notif.id, fds[1], cloexec),
+        ) {
+            (Ok(r), Ok(w)) => (
+                table.insert_at(read_file, r, cloexec),
+                table.insert_at(write_file, w, cloexec),
+            ),
+            // No live guest (tests): fall back to the table's numbering.
+            _ => (
+                table.insert(read_file, cloexec),
+                table.insert(write_file, cloexec),
+            ),
+        };
         drop(state);
-
-        let _ = self.notifier.addfd(notif.id, fds[0], read_vfd, cloexec);
-        let _ = self.notifier.addfd(notif.id, fds[1], write_vfd, cloexec);
 
         let vfds = [read_vfd, write_vfd];
         self.mem.write_val(caller, pipefd_ptr, &vfds)?;
@@ -813,7 +828,7 @@ impl Supervisor {
         // (backend-aware, so tmp-overlay dirs are recognized).
         const S_IFMT: u32 = 0o170000;
         const S_IFDIR: u32 = 0o040000;
-        let sx = Self::statx_routed(&state.overlay, btype, &normalized)?;
+        let sx = Self::statx_routed(&state.overlay, btype, &normalized, false)?;
         if u32::from(sx.stx_mode) & S_IFMT != S_IFDIR {
             return Err(SysError(Errno::NOTDIR));
         }
@@ -926,12 +941,15 @@ impl Supervisor {
         overlay: &OverlayRoot,
         btype: BackendType,
         path: &str,
+        nofollow: bool,
     ) -> SysResult<crate::virt::fs::backend::sys::Statx> {
         use crate::error::{Errno, SysError};
+        // A fully-normalized root resolves to the empty string; stat "/".
+        let path = if path.is_empty() { "/" } else { path };
         match btype {
-            BackendType::Passthrough => backend::passthrough_statx_path(path),
-            BackendType::Cow => backend::cow_statx_path(overlay, path),
-            BackendType::Tmp => backend::tmp_statx_path(overlay, path),
+            BackendType::Passthrough => backend::passthrough_statx_path(path, nofollow),
+            BackendType::Cow => backend::cow_statx_path(overlay, path, nofollow),
+            BackendType::Tmp => backend::tmp_statx_path(overlay, path, nofollow),
             BackendType::Proc | BackendType::Event => Err(SysError(Errno::NOSYS)),
         }
     }
@@ -988,7 +1006,8 @@ impl Supervisor {
             let (content, is_dir) = self.build_proc(&mut state, caller, &normalized)?;
             backend::proc_open(content, is_dir).statx()?
         } else {
-            Self::statx_routed(&state.overlay, btype, &normalized)?
+            let nofollow = flags & libc::AT_SYMLINK_NOFOLLOW != 0;
+            Self::statx_routed(&state.overlay, btype, &normalized, nofollow)?
         };
         drop(state);
         let st = crate::virt::fs::file::statx_to_stat(&sx);
@@ -1054,7 +1073,10 @@ impl Supervisor {
             let (content, is_dir) = self.build_proc(&mut state, caller, &normalized)?;
             backend::proc_open(content, is_dir).statx()?
         } else {
-            Self::statx_routed(&state.overlay, btype, &normalized)?
+            {
+                let nofollow = flags & libc::AT_SYMLINK_NOFOLLOW != 0;
+                Self::statx_routed(&state.overlay, btype, &normalized, nofollow)?
+            }
         };
         drop(state);
         self.mem.write_val(caller, statx_addr, &sx)?;
@@ -1438,16 +1460,83 @@ impl Supervisor {
         };
         let mut link = vec![0u8; buf_size.max(1)];
         let n = {
-            let state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap();
             match btype {
                 BackendType::Cow => backend::cow_readlink(&state.overlay, &normalized, &mut link)?,
                 BackendType::Tmp => backend::tmp_readlink(&state.overlay, &normalized, &mut link)?,
-                // /proc symlinks (e.g. self/exe) unimplemented; passthrough denied.
-                _ => return Err(SysError(Errno::INVAL)),
+                BackendType::Passthrough => backend::passthrough_readlink(&normalized, &mut link)?,
+                // Virtual /proc symlinks we can answer (self/cwd, fd/N of a
+                // tracked file); anything else defers to the real /proc —
+                // realpath implementations (Bun, Zig, Go) readlink
+                // /proc/self/fd/N, so this must work.
+                BackendType::Proc => {
+                    match self.proc_readlink(&mut state, caller, &normalized, &mut link)? {
+                        Some(n) => n,
+                        None => return Ok(notif::reply_continue(notif.id)),
+                    }
+                }
+                BackendType::Event => return Err(SysError(Errno::INVAL)),
             }
         };
         self.mem.write_bytes(caller, buf_addr, &link[..n])?;
         Ok(notif::reply_success(notif.id, n as i64))
+    }
+
+    /// Answer the /proc symlinks backed by virtual state: `self/cwd` (virtual
+    /// cwd) and `<self|tid>/fd/N` when fd N is a tracked file with a recorded
+    /// guest path. `Ok(None)` defers to the real /proc (kernel-created fds,
+    /// self/exe, ...).
+    fn proc_readlink(
+        &self,
+        state: &mut VirtState,
+        caller: i32,
+        path: &str,
+        buf: &mut [u8],
+    ) -> SysResult<Option<usize>> {
+        let Some(rest) = path.strip_prefix("/proc/") else {
+            return Ok(None);
+        };
+        let (who, sub) = match rest.split_once('/') {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+        let procinfo = &*self.procinfo;
+        let tid = if who == "self" {
+            caller
+        } else {
+            match who.parse::<i32>() {
+                Ok(n) if n == caller || state.threads.contains(n) => n,
+                _ => return Ok(None),
+            }
+        };
+        let write_str = |buf: &mut [u8], s: &str| {
+            let n = s.len().min(buf.len());
+            buf[..n].copy_from_slice(&s.as_bytes()[..n]);
+            n
+        };
+        if sub == "cwd" {
+            let cwd = state
+                .threads
+                .cwd(tid)
+                .map(|c| if c.is_empty() { "/" } else { c })
+                .unwrap_or("/")
+                .to_string();
+            return Ok(Some(write_str(buf, &cwd)));
+        }
+        if let Some(fd_str) = sub.strip_prefix("fd/") {
+            let Ok(fd) = fd_str.parse::<i32>() else {
+                return Ok(None);
+            };
+            let Some(table) = state.fd_table(tid, procinfo) else {
+                return Ok(None);
+            };
+            if let Some(file) = table.get(fd) {
+                if let Some(p) = &file.opened_path {
+                    return Ok(Some(write_str(buf, p)));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// symlinkat: create a symlink in the cow/tmp overlay.
@@ -1547,6 +1636,24 @@ impl Supervisor {
         Ok(notif::reply_success(notif.id, total as i64))
     }
 
+    /// Reserve a guest fd slot for a purely virtual file by installing a
+    /// /dev/null placeholder there. All guest I/O on the number is intercepted
+    /// and served from the virtual file; the placeholder only keeps the
+    /// kernel's fd allocator from reusing the slot.
+    fn addfd_placeholder(&self, notif_id: u64, cloexec: bool) -> SysResult<RawFd> {
+        use crate::error::{Errno, SysError};
+        let devnull = std::ffi::CString::new("/dev/null").unwrap();
+        // SAFETY: plain open of /dev/null; fd closed right after the addfd dup.
+        let fd = unsafe { libc::open(devnull.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+        if fd < 0 {
+            return Err(SysError(Errno::IO));
+        }
+        let r = self.notifier.addfd_auto(notif_id, fd, cloexec);
+        // SAFETY: closing our own just-opened fd (the guest holds the dup).
+        unsafe { libc::close(fd) };
+        r
+    }
+
     /// Insert a freshly created kernel fd as a passthrough File into the caller's
     /// table and addfd it into the guest. Returns the virtual fd.
     fn register_kernel_fd(
@@ -1560,12 +1667,15 @@ impl Supervisor {
         let file = Arc::new(File::new(backend::Backend::Passthrough(kernel_fd)));
         let mut state = self.state.lock().unwrap();
         let procinfo = &*self.procinfo;
-        let vfd = state
+        // The kernel picks the guest fd (single allocator: the guest's own fd
+        // table); the same number becomes the vfd so they can never diverge or
+        // clobber a kernel-created fd (epoll, timerfd, ...).
+        let vfd = self.notifier.addfd_auto(notif.id, kernel_fd, cloexec)?;
+        state
             .fd_table(caller, procinfo)
             .ok_or(SysError(Errno::SRCH))?
-            .insert(file, cloexec);
+            .insert_at(file, vfd, cloexec);
         drop(state);
-        let _ = self.notifier.addfd(notif.id, kernel_fd, vfd, cloexec);
         Ok(vfd)
     }
 
@@ -1919,12 +2029,17 @@ impl Supervisor {
         match cmd {
             libc::F_DUPFD | F_DUPFD_CLOEXEC => {
                 let cloexec = cmd == F_DUPFD_CLOEXEC;
-                let backing = file.backing_fd();
-                let newfd = table.dup(file);
+                let newfd = match file.backing_fd() {
+                    Some(bfd) => match self.notifier.addfd_auto(notif.id, bfd, cloexec) {
+                        Ok(fd) => table.dup_at(file, fd, cloexec),
+                        Err(_) => table.dup(file), // no live guest (tests)
+                    },
+                    None => match self.addfd_placeholder(notif.id, cloexec) {
+                        Ok(fd) => table.dup_at(file, fd, cloexec),
+                        Err(_) => table.dup(file),
+                    },
+                };
                 table.set_cloexec(newfd, cloexec);
-                if let Some(bfd) = backing {
-                    let _ = self.notifier.addfd(notif.id, bfd, newfd, cloexec);
-                }
                 Ok(notif::reply_success(notif.id, newfd as i64))
             }
             libc::F_GETFD => {
@@ -2544,7 +2659,7 @@ mod tests {
             -1,
             100,
             Box::new(LocalMem),
-            Box::new(NoopNotifier),
+            Box::new(NoopNotifier::default()),
             Box::new(proc),
             Arc::new(LogBuffer::new()),
             Arc::new(LogBuffer::new()),

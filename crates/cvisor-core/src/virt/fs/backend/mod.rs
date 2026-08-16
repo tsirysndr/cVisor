@@ -368,22 +368,22 @@ pub fn cow_open(overlay: &OverlayRoot, path: &str, flags: i32, mode: u32) -> Sys
 }
 
 /// statx a path from the guest's view: cow copy if present, else the real path.
-pub fn cow_statx_path(overlay: &OverlayRoot, path: &str) -> SysResult<sys::Statx> {
+pub fn cow_statx_path(overlay: &OverlayRoot, path: &str, nofollow: bool) -> SysResult<sys::Statx> {
     if overlay.cow_exists(path) {
-        sys::statx_path(&overlay.resolve_cow(path))
+        sys::statx_path(&overlay.resolve_cow(path), nofollow)
     } else {
-        sys::statx_path(path)
+        sys::statx_path(path, nofollow)
     }
 }
 
 /// statx a path in the tmp overlay.
-pub fn tmp_statx_path(overlay: &OverlayRoot, path: &str) -> SysResult<sys::Statx> {
-    sys::statx_path(&overlay.resolve_tmp(path)?)
+pub fn tmp_statx_path(overlay: &OverlayRoot, path: &str, nofollow: bool) -> SysResult<sys::Statx> {
+    sys::statx_path(&overlay.resolve_tmp(path)?, nofollow)
 }
 
 /// statx a real path (passthrough).
-pub fn passthrough_statx_path(path: &str) -> SysResult<sys::Statx> {
-    sys::statx_path(path)
+pub fn passthrough_statx_path(path: &str, nofollow: bool) -> SysResult<sys::Statx> {
+    sys::statx_path(path, nofollow)
 }
 
 /// faccessat(F_OK-style) existence check on the guest path (real lower layer).
@@ -410,6 +410,11 @@ pub fn cow_readlink(overlay: &OverlayRoot, path: &str, buf: &mut [u8]) -> SysRes
 /// readlink in the tmp overlay.
 pub fn tmp_readlink(overlay: &OverlayRoot, path: &str, buf: &mut [u8]) -> SysResult<usize> {
     do_readlink(&overlay.resolve_tmp(path)?, buf)
+}
+
+/// readlink on a real (passthrough) path.
+pub fn passthrough_readlink(path: &str, buf: &mut [u8]) -> SysResult<usize> {
+    do_readlink(path, buf)
 }
 
 fn do_readlink(path: &str, buf: &mut [u8]) -> SysResult<usize> {

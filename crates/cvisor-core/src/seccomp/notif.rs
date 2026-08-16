@@ -146,6 +146,20 @@ pub fn addfd(
     unsafe { ioctl_notif_addfd(notify_fd, &req) }.map(|_| ())
 }
 
+/// ADDFD letting the kernel pick the guest fd (lowest free slot in the guest's
+/// own table — the single allocator). Returns the chosen fd number.
+pub fn addfd_auto(notify_fd: RawFd, id: u64, srcfd: RawFd, cloexec: bool) -> nix::Result<RawFd> {
+    let req = SeccompNotifAddfd {
+        id,
+        flags: 0,
+        srcfd: srcfd as u32,
+        newfd: 0,
+        newfd_flags: if cloexec { libc::O_CLOEXEC as u32 } else { 0 },
+    };
+    // SAFETY: notify_fd valid; req is a live, fully-initialized struct.
+    unsafe { ioctl_notif_addfd(notify_fd, &req) }.map(|fd| fd as RawFd)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

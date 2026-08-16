@@ -156,9 +156,16 @@ pub fn statx_fd(fd: RawFd) -> SysResult<Statx> {
     raw_statx(fd, empty.as_ptr(), libc::AT_EMPTY_PATH)
 }
 
-/// `statx` on a path (opens O_PATH first, works on any file type).
-pub fn statx_path(path: &str) -> SysResult<Statx> {
-    let fd = openat(path, libc::O_PATH, 0)?;
+/// `statx` on a path (opens O_PATH first, works on any file type). With
+/// `nofollow`, a final-component symlink is statted itself (lstat semantics) —
+/// realpath walkers (node, git) depend on seeing S_IFLNK here.
+pub fn statx_path(path: &str, nofollow: bool) -> SysResult<Statx> {
+    let flags = if nofollow {
+        libc::O_PATH | libc::O_NOFOLLOW
+    } else {
+        libc::O_PATH
+    };
+    let fd = openat(path, flags, 0)?;
     let out = statx_fd(fd);
     close(fd);
     out
