@@ -7,8 +7,10 @@
 //! (remote mode), so `cvisor -- <cmd>` and `cvisor` (shell) "just work".
 //!
 //! The microVM is created once and reused for every run (started again if it was
-//! stopped). The daemon's bearer token is generated on first boot and cached
-//! under `~/.cvisor/` so later invocations reconnect to the same daemon.
+//! stopped — a restart re-launches `cvisord` through the guest agent, since
+//! `bsdkrun start` doesn't replay the entrypoint/env of the original boot). The
+//! daemon's bearer token is generated on first boot and cached under
+//! `~/.cvisor/` so later invocations reconnect to the same daemon.
 //!
 //! Requires the `bsdkrun` CLI to be installed (`cvisor doctor` checks this).
 //!
@@ -220,9 +222,16 @@ fn ensure_daemon_running(sb: &Sandbox, token: &str) -> Result<(), i32> {
 }
 
 /// Shell run in the guest to (re)start `cvisord` detached, with the env the
-/// original boot gave it. Idempotent: it exits early if a daemon is already
-/// running, so retrying the exec never stacks up processes fighting for the
-/// listen ports.
+/// original boot gave it.
+///
+/// Two details the guest agent forces:
+///   - `setsid`, because the agent kills the exec's session once the command
+///     returns — a plain background job dies with it;
+///   - `( … & )`, so no shell is left waiting on the daemon: a lingering one
+///     holds the agent's output pipes open and the exec never returns.
+///
+/// The `/proc` scan makes it idempotent, so a retried exec can't stack up
+/// daemons fighting over the listen ports.
 fn daemon_launch_script(token: &str) -> String {
     format!(
         r#"for p in /proc/[0-9]*; do
@@ -234,10 +243,11 @@ export CVISOR_TOKEN='{token}'
 export CVISOR_GRPC_ADDR='0.0.0.0:{GRPC_PORT}'
 export CVISOR_HTTP_ADDR='0.0.0.0:{HTTP_PORT}'
 mkdir -p /var/log
-launch() {{
-    if command -v setsid >/dev/null 2>&1; then setsid cvisord; else cvisord; fi
-}}
-launch >/var/log/cvisord.log 2>&1 </dev/null &
+if command -v setsid >/dev/null 2>&1; then
+    ( setsid cvisord >/var/log/cvisord.log 2>&1 </dev/null & )
+else
+    ( cvisord >/var/log/cvisord.log 2>&1 </dev/null & )
+fi
 "#,
         token = sh_quoted(token),
     )
