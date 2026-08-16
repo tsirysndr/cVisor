@@ -2,19 +2,20 @@
 
 cVisor ships one **native runtime** and several thin language SDKs that wrap it.
 
-| SDK     | Mechanism                                          | Entry point          |
-| ------- | -------------------------------------------------- | -------------------- |
-| Node    | N-API native module (`libcvisor.node`)             | `node/`              |
-| Bun     | Bun FFI (`bun:ffi`) over `libcvisor.so`            | `node/src/bun.ts`    |
-| Deno    | Deno FFI (`Deno.dlopen`) over `libcvisor.so`       | `node/src/deno.ts`   |
-| Python  | `ctypes` FFI over `libcvisor.so` (uv project)      | `python/`            |
-| Ruby    | `fiddle` FFI over `libcvisor.so`                   | `ruby/lib/cvisor.rb` |
-| Erlang  | NIF bridging to `libcvisor.so`                     | `erlang/`            |
-| Elixir  | pipe-friendly builder over the Erlang `cvisor` NIF | `elixir/`            |
-| Gleam   | pipe-friendly builder over the Erlang `cvisor` NIF | `gleam/`             |
-| Clojure | Java FFM (`java.lang.foreign`) over `libcvisor.so` | `clojure/`           |
-| Go      | daemon GraphQL (any OS) + cgo `libcvisor` (Linux)  | `go/`                |
-| Rust    | daemon GraphQL (any OS) + `cvisor-core` (Linux)    | `rust/`              |
+| SDK     | Mechanism                                              | Entry point          |
+| ------- | ------------------------------------------------------ | -------------------- |
+| Node    | N-API native module (`libcvisor.node`)                 | `node/`              |
+| Bun     | Bun FFI (`bun:ffi`) over `libcvisor.so`                | `node/src/bun.ts`    |
+| Deno    | Deno FFI (`Deno.dlopen`) over `libcvisor.so`           | `node/src/deno.ts`   |
+| Python  | `ctypes` FFI over `libcvisor.so` (uv project)          | `python/`            |
+| Ruby    | `fiddle` FFI over `libcvisor.so`                       | `ruby/lib/cvisor.rb` |
+| Erlang  | NIF bridging to `libcvisor.so`                         | `erlang/`            |
+| Elixir  | pipe-friendly builder over the Erlang `cvisor` NIF     | `elixir/`            |
+| Gleam   | pipe-friendly builder over the Erlang `cvisor` NIF     | `gleam/`             |
+| Clojure | Java FFM (`java.lang.foreign`) over `libcvisor.so`     | `clojure/`           |
+| Go      | daemon GraphQL (any OS) + cgo `libcvisor` (Linux)      | `go/`                |
+| Rust    | daemon GraphQL (any OS) + `cvisor-core` (Linux)        | `rust/`              |
+| Scala   | daemon GraphQL (any OS) + Java FFM `libcvisor` (Linux) | `scala/`             |
 
 The Elixir (`cvisor_ex`) and Gleam (`gleam_cvisor`) SDKs both run on the BEAM
 and reuse the Erlang SDK's NIF runtime (a path dependency on `erlang/`), adding

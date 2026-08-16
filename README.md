@@ -9,7 +9,7 @@ spinning up a sandbox in **~2 ms** — ideal for the ephemeral tasks agents run,
 code execution and filesystem operations.
 
 Unlike gVisor, cVisor runs **in-process**. Use it three ways: embed it via a **CLI**
-and **10-language SDKs**, or run it as a **daemon** (`cvisord`) exposing the full
+and **11-language SDKs**, or run it as a **daemon** (`cvisord`) exposing the full
 runtime over **gRPC + GraphQL** with a **web & desktop UI** — so you can drive Linux
 sandboxes from any host, macOS included.
 
@@ -66,8 +66,9 @@ remote `cvisord` over gRPC/GraphQL from **any OS, including macOS**.
   restarts.
 - **Web & desktop UI** — a React app (terminal, command palette, synthwave theme);
   the web build talks GraphQL, the Tauri desktop app talks gRPC.
-- **10-language SDKs** — Node/Bun/Deno, Python, Ruby, Erlang, Elixir, Gleam,
-  Clojure, Go, Rust: native FFI on Linux, a GraphQL client to a daemon on any OS.
+- **11-language SDKs** — Node/Bun/Deno, Python, Ruby, Erlang, Elixir, Gleam,
+  Clojure, Go, Rust, Scala: native FFI on Linux, a GraphQL client to a daemon on
+  any OS.
 - **Ships everywhere** — static binaries, Alpine / Debian / Ubuntu Docker images,
   and a Nix flake.
 
@@ -123,8 +124,8 @@ Unsafe commands are blocked:
 sb.runCmd("chroot /tmp"); // error
 ```
 
-SDKs for **10 languages** (Python, Ruby, Erlang, Elixir, Gleam, Clojure, Go,
-Rust, plus Bun/Deno alongside Node) are published — and each can also drive a
+SDKs for **11 languages** (Python, Ruby, Erlang, Elixir, Gleam, Clojure, Go,
+Rust, Scala, plus Bun/Deno alongside Node) are published — and each can also drive a
 remote daemon over GraphQL from any OS, macOS included. See the
 [SDKs](#sdks) section and [sdks/README.md](sdks/README.md).
 
@@ -262,8 +263,8 @@ A Tauri desktop build of the same app talks to the daemon over gRPC instead. See
 
 ## SDKs
 
-cVisor ships SDKs in **10 languages** — Node/Bun/Deno, Python, Ruby, Erlang,
-Elixir, Gleam, Clojure, Go, and Rust. On Linux they wrap the native runtime
+cVisor ships SDKs in **11 languages** — Node/Bun/Deno, Python, Ruby, Erlang,
+Elixir, Gleam, Clojure, Go, Rust, and Scala. On Linux they wrap the native runtime
 (FFI/NIF over `libcvisor`); on any OS — **macOS included** — they also expose a
 GraphQL client and a `RemoteSandbox` that drives a `cvisord` daemon. See
 [sdks/README.md](sdks/README.md).
