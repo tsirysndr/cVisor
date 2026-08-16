@@ -83,7 +83,7 @@ export function CachesView() {
                       isIconOnly
                       size="sm"
                       variant="light"
-                      radius="none"
+                      radius="sm"
                       aria-label="Remove cache entry"
                       isLoading={remove.isPending}
                       onPress={() => remove.mutate({ key: c.name })}

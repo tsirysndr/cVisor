@@ -68,7 +68,7 @@ export function RunCommandModal() {
               autoFocus
               label="Command"
               variant="bordered"
-              radius="none"
+              radius="sm"
               placeholder="uname -a"
               isInvalid={!!errors.command}
               errorMessage={errors.command?.message}
@@ -79,7 +79,7 @@ export function RunCommandModal() {
               label="Timeout (ms)"
               type="number"
               variant="bordered"
-              radius="none"
+              radius="sm"
               placeholder="0"
               className="w-36"
               isInvalid={!!errors.timeoutMs}

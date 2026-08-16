@@ -75,7 +75,7 @@ export function CommandPalette() {
       <Command
         label="Command palette"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg overflow-hidden border border-content3 bg-content1 shadow-[0_0_30px_rgba(255,42,109,0.15)]"
+        className="w-full max-w-lg overflow-hidden rounded-large border border-content3 bg-content1 shadow-[0_0_30px_rgba(255,42,109,0.15)]"
       >
         <Command.Input
           autoFocus

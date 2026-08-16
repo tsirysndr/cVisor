@@ -85,6 +85,7 @@ export function webTransport(): Transport {
           id: input.id,
           allowNetwork: input.allowNetwork ?? null,
           allowListen: input.allowListen ?? null,
+          limits: input.limits ?? null,
         })
       ).configure;
     },

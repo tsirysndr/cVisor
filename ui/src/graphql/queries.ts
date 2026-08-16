@@ -18,6 +18,11 @@ export const SANDBOXES = gql`
       name
       allowNetwork
       allowListen
+      limits {
+        memoryMax
+        pidsMax
+        cpuPercent
+      }
     }
   }
 `;
@@ -53,6 +58,11 @@ export const CREATE_SANDBOX = gql`
       name
       allowNetwork
       allowListen
+      limits {
+        memoryMax
+        pidsMax
+        cpuPercent
+      }
     }
   }
 `;
@@ -68,12 +78,23 @@ export const CONFIGURE = gql`
     $id: String!
     $allowNetwork: Boolean
     $allowListen: Boolean
+    $limits: LimitsInput
   ) {
-    configure(id: $id, allowNetwork: $allowNetwork, allowListen: $allowListen) {
+    configure(
+      id: $id
+      allowNetwork: $allowNetwork
+      allowListen: $allowListen
+      limits: $limits
+    ) {
       id
       name
       allowNetwork
       allowListen
+      limits {
+        memoryMax
+        pidsMax
+        cpuPercent
+      }
     }
   }
 `;
@@ -113,6 +134,11 @@ export const BRANCH = gql`
       name
       allowNetwork
       allowListen
+      limits {
+        memoryMax
+        pidsMax
+        cpuPercent
+      }
     }
   }
 `;
@@ -124,6 +150,11 @@ export const FORK = gql`
       name
       allowNetwork
       allowListen
+      limits {
+        memoryMax
+        pidsMax
+        cpuPercent
+      }
     }
   }
 `;

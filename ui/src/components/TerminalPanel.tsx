@@ -82,7 +82,7 @@ export function TerminalPanel() {
               isIconOnly
               size="sm"
               variant="light"
-              radius="none"
+              radius="sm"
               aria-label="Toggle fullscreen"
               onPress={() => setFullscreen((f) => !f)}
             >
@@ -98,7 +98,7 @@ export function TerminalPanel() {
               isIconOnly
               size="sm"
               variant="light"
-              radius="none"
+              radius="sm"
               aria-label="Hide terminal"
               onPress={() => {
                 setFullscreen(false);

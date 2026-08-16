@@ -4,11 +4,19 @@ import type { CvisorConfig } from "../config";
 // the transport boundary as `Uint8Array`; each implementation handles its own
 // base64 (de)coding internally.
 
+// Resource limits; null/undefined = unset (unlimited).
+export interface Limits {
+  memoryMax?: number | null;
+  pidsMax?: number | null;
+  cpuPercent?: number | null;
+}
+
 export interface Sandbox {
   id: string;
   name: string;
   allowNetwork: boolean;
   allowListen: boolean;
+  limits?: Limits;
 }
 
 export interface Health {
@@ -37,6 +45,7 @@ export interface ConfigureInput {
   id: string;
   allowNetwork?: boolean;
   allowListen?: boolean;
+  limits?: Limits;
 }
 
 // An open interactive terminal. Output is delivered to the callback passed to

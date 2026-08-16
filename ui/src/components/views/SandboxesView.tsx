@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Input, Tooltip } from "@heroui/react";
 import { useAtom, useSetAtom } from "jotai";
 import {
+  IconAdjustmentsHorizontal,
   IconCamera,
   IconFilter,
   IconGitFork,
@@ -12,6 +13,7 @@ import {
 import {
   cursorAtom,
   runModalOpenAtom,
+  sandboxSettingsAtom,
   selectedSandboxAtom,
   terminalPanelVisibleAtom,
 } from "../../state/atoms";
@@ -36,6 +38,7 @@ export function SandboxesView() {
   const [selected, setSelected] = useAtom(selectedSandboxAtom);
   const setPanel = useSetAtom(terminalPanelVisibleAtom);
   const setRunOpen = useSetAtom(runModalOpenAtom);
+  const setSandboxSettings = useSetAtom(sandboxSettingsAtom);
   const [filter, setFilter] = useState("");
   const free = useFreeSandbox();
   const fork = useFork();
@@ -79,7 +82,7 @@ export function SandboxesView() {
         <Input
           size="sm"
           variant="bordered"
-          radius="none"
+          radius="sm"
           className="w-56"
           aria-label="Filter sandboxes"
           placeholder="Filter sandboxes…"
@@ -140,7 +143,7 @@ export function SandboxesView() {
                         isIconOnly
                         size="sm"
                         variant="light"
-                        radius="none"
+                        radius="sm"
                         aria-label="Open terminal"
                         onPress={() => open(sb.id)}
                       >
@@ -152,7 +155,7 @@ export function SandboxesView() {
                         isIconOnly
                         size="sm"
                         variant="light"
-                        radius="none"
+                        radius="sm"
                         aria-label="Run command"
                         onPress={() => {
                           setSelected(sb.id);
@@ -163,12 +166,27 @@ export function SandboxesView() {
                         <IconPlus size={16} className="text-default-400" />
                       </Button>
                     </Tooltip>
+                    <Tooltip content="Settings">
+                      <Button
+                        isIconOnly
+                        size="sm"
+                        variant="light"
+                        radius="sm"
+                        aria-label="Sandbox settings"
+                        onPress={() => setSandboxSettings(sb.id)}
+                      >
+                        <IconAdjustmentsHorizontal
+                          size={16}
+                          className="text-default-400"
+                        />
+                      </Button>
+                    </Tooltip>
                     <Tooltip content="Snapshot">
                       <Button
                         isIconOnly
                         size="sm"
                         variant="light"
-                        radius="none"
+                        radius="sm"
                         aria-label="Snapshot"
                         isLoading={snapshot.isPending}
                         onPress={() => snapshot.mutate({ id: sb.id })}
@@ -181,7 +199,7 @@ export function SandboxesView() {
                         isIconOnly
                         size="sm"
                         variant="light"
-                        radius="none"
+                        radius="sm"
                         aria-label="Fork"
                         isLoading={fork.isPending}
                         onPress={() => fork.mutate({ id: sb.id })}
@@ -194,7 +212,7 @@ export function SandboxesView() {
                         isIconOnly
                         size="sm"
                         variant="light"
-                        radius="none"
+                        radius="sm"
                         aria-label="Free sandbox"
                         onPress={() => free.mutate(sb.id)}
                       >

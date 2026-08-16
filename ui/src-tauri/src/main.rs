@@ -20,7 +20,7 @@ use cvisor_proto::cvisor::{
     RollbackRequest, RunRequest, Sandbox, SandboxRef, ShellInput, ShellStart, SnapshotRef,
     SnapshotRequest, WriteFileRequest,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
@@ -88,6 +88,25 @@ async fn client(state: &AppState) -> Result<Client, String> {
     connect(&cfg).await
 }
 
+/// Limits as the frontend sees them: absent/null = unset. The proto encodes
+/// unset as 0.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct LimitsDto {
+    memory_max: Option<u64>,
+    pids_max: Option<u64>,
+    cpu_percent: Option<u32>,
+}
+
+fn limits_dto(l: Option<cvisor_proto::cvisor::Limits>) -> LimitsDto {
+    let l = l.unwrap_or_default();
+    LimitsDto {
+        memory_max: (l.memory_max > 0).then_some(l.memory_max),
+        pids_max: (l.pids_max > 0).then_some(l.pids_max),
+        cpu_percent: (l.cpu_percent > 0).then_some(l.cpu_percent),
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SandboxDto {
@@ -95,6 +114,7 @@ struct SandboxDto {
     name: String,
     allow_network: bool,
     allow_listen: bool,
+    limits: LimitsDto,
 }
 
 fn sandbox_dto(s: Sandbox) -> SandboxDto {
@@ -103,6 +123,7 @@ fn sandbox_dto(s: Sandbox) -> SandboxDto {
         name: s.name,
         allow_network: s.allow_network,
         allow_listen: s.allow_listen,
+        limits: limits_dto(s.limits),
     }
 }
 
@@ -211,14 +232,20 @@ async fn configure(
     id: String,
     allow_network: Option<bool>,
     allow_listen: Option<bool>,
+    limits: Option<LimitsDto>,
 ) -> Result<SandboxDto, String> {
     let mut client = client(&state).await?;
+    let limits = limits.map(|l| cvisor_proto::cvisor::Limits {
+        memory_max: l.memory_max.unwrap_or(0),
+        pids_max: l.pids_max.unwrap_or(0),
+        cpu_percent: l.cpu_percent.unwrap_or(0),
+    });
     let s = client
         .configure(ConfigureRequest {
             id,
             allow_network,
             allow_listen,
-            limits: None,
+            limits,
             env: vec![],
         })
         .await

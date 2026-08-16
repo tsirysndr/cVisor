@@ -24,6 +24,10 @@ export const runModalOpenAtom = atom(false);
 export const createModalOpenAtom = atom(false);
 export const settingsOpenAtom = atom(false);
 
+// Per-sandbox settings modal (network flags + resource limits): the id of the
+// sandbox being edited, or null when closed.
+export const sandboxSettingsAtom = atom<string | null>(null);
+
 // Snapshot picker modal: branch a new sandbox from a snapshot, or roll the
 // selected sandbox back to one. `null` when closed.
 export type SnapshotPickerMode = "branch" | "rollback";

@@ -6,6 +6,7 @@ import {
   helpOpenAtom,
   paletteOpenAtom,
   runModalOpenAtom,
+  sandboxSettingsAtom,
   selectedSandboxAtom,
   settingsOpenAtom,
   sidebarVisibleAtom,
@@ -57,6 +58,7 @@ export function useShortcuts() {
   const settings = useAtomValue(settingsOpenAtom);
   const run = useAtomValue(runModalOpenAtom);
   const picker = useAtomValue(snapshotPickerAtom);
+  const sandboxSettings = useAtomValue(sandboxSettingsAtom);
   const setView = useSetAtom(viewAtom);
 
   const sandboxes = useInfiniteSandboxes();
@@ -75,7 +77,14 @@ export function useShortcuts() {
         ? snapshots
         : caches;
   const items = active.items;
-  const overlayOpen = palette || help || create || settings || run || picker !== null;
+  const overlayOpen =
+    palette ||
+    help ||
+    create ||
+    settings ||
+    run ||
+    picker !== null ||
+    sandboxSettings !== null;
 
   useEffect(() => {
     const move = (delta: number) => {

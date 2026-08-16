@@ -78,7 +78,7 @@ export function ConfigForm({
         {...register("graphqlUrl")}
         label={desktop ? "Daemon gRPC URL" : "GraphQL URL"}
         variant="bordered"
-        radius="none"
+        radius="sm"
         placeholder={
           desktop ? "http://localhost:50051" : "http://localhost:8080/graphql"
         }
@@ -90,7 +90,7 @@ export function ConfigForm({
           {...register("wsUrl", { onChange: () => (wsEdited.current = true) })}
           label="WebSocket URL"
           variant="bordered"
-          radius="none"
+          radius="sm"
           placeholder="ws://localhost:8080/graphql/ws"
           isInvalid={!!errors.wsUrl}
           errorMessage={errors.wsUrl?.message}
@@ -101,7 +101,7 @@ export function ConfigForm({
         label="Token"
         type="password"
         variant="bordered"
-        radius="none"
+        radius="sm"
         placeholder="bearer token"
         isInvalid={!!errors.token}
         errorMessage={errors.token?.message}

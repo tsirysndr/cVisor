@@ -4,7 +4,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { getDefaultStore } from "jotai";
-import { getTransport, type Sandbox } from "../transport";
+import {
+  getTransport,
+  type ConfigureInput,
+  type Limits,
+  type Sandbox,
+} from "../transport";
 import { selectedSandboxAtom } from "../state/atoms";
 
 const KEY = ["sandboxes"] as const;
@@ -26,7 +31,23 @@ export function useSandboxes() {
 export function useCreateSandbox() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name?: string) => getTransport().createSandbox(name || null),
+    mutationFn: async (vars?: { name?: string; limits?: Limits }) => {
+      const t = getTransport();
+      const sb = await t.createSandbox(vars?.name || null);
+      // Limits are applied via configure; create itself only takes a name.
+      if (vars?.limits && Object.keys(vars.limits).length > 0) {
+        return t.configure({ id: sb.id, limits: vars.limits });
+      }
+      return sb;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+export function useConfigure() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ConfigureInput) => getTransport().configure(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
 }

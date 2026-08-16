@@ -59,7 +59,7 @@ export function TopBar() {
             isIconOnly
             size="sm"
             variant="light"
-            radius="none"
+            radius="sm"
             aria-label="Toggle sidebar"
             className="text-default-500 data-[hover=true]:text-secondary"
             onPress={() => setSidebar((s) => !s)}
@@ -76,7 +76,7 @@ export function TopBar() {
             isIconOnly
             size="sm"
             variant="light"
-            radius="none"
+            radius="sm"
             aria-label="Toggle terminal panel"
             className="text-default-500 data-[hover=true]:text-secondary"
             onPress={() => setPanel((p) => !p)}
@@ -120,7 +120,7 @@ export function TopBar() {
         <Button
           size="sm"
           variant="flat"
-          radius="none"
+          radius="sm"
           startContent={<IconSearch size={16} />}
           onPress={() => setPaletteOpen(true)}
         >
@@ -132,7 +132,7 @@ export function TopBar() {
             isIconOnly
             size="sm"
             variant="light"
-            radius="none"
+            radius="sm"
             aria-label="Toggle theme"
             onPress={() => setTheme(theme === "dark" ? "light" : "dark")}
           >
@@ -144,7 +144,7 @@ export function TopBar() {
             isIconOnly
             size="sm"
             variant="light"
-            radius="none"
+            radius="sm"
             aria-label="Settings"
             onPress={() => setSettingsOpen(true)}
           >

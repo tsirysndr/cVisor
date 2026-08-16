@@ -86,7 +86,7 @@ export function SnapshotsView() {
                         isIconOnly
                         size="sm"
                         variant="light"
-                        radius="none"
+                        radius="sm"
                         aria-label="Branch"
                         isLoading={branch.isPending}
                         onPress={() =>
@@ -115,7 +115,7 @@ export function SnapshotsView() {
                         isIconOnly
                         size="sm"
                         variant="light"
-                        radius="none"
+                        radius="sm"
                         aria-label="Rollback"
                         isDisabled={!selected}
                         isLoading={rollback.isPending}
@@ -135,7 +135,7 @@ export function SnapshotsView() {
                         isIconOnly
                         size="sm"
                         variant="light"
-                        radius="none"
+                        radius="sm"
                         aria-label="Delete snapshot"
                         isLoading={del.isPending}
                         onPress={() => del.mutate(s.name)}

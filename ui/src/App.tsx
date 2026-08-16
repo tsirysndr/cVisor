@@ -13,6 +13,7 @@ import { useShortcuts } from "./hooks/useShortcuts";
 import { useTrayActions, useTrayStatus } from "./hooks/useTray";
 import { TitleBar } from "./components/TitleBar";
 import { TopBar } from "./components/TopBar";
+import { StatusLine } from "./components/StatusLine";
 import { Sidebar } from "./components/Sidebar";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { SandboxesView } from "./components/views/SandboxesView";
@@ -23,6 +24,7 @@ import { HelpModal } from "./components/HelpModal";
 import { RunCommandModal } from "./components/RunCommandModal";
 import { CreateSandboxModal } from "./components/CreateSandboxModal";
 import { SnapshotPickerModal } from "./components/SnapshotPickerModal";
+import { SandboxSettingsModal } from "./components/SandboxSettingsModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { SetupScreen } from "./components/SetupScreen";
 
@@ -82,12 +84,14 @@ function Workspace() {
         </div>
         <TerminalPanel />
       </div>
+      <StatusLine />
 
       <CommandPalette />
       <HelpModal />
       <RunCommandModal />
       <CreateSandboxModal />
       <SnapshotPickerModal />
+      <SandboxSettingsModal />
       <SettingsModal />
     </>
   );

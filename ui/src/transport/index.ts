@@ -4,6 +4,7 @@ import { tauriTransport } from "./tauri";
 
 export type {
   Sandbox,
+  Limits,
   Health,
   CacheEntry,
   RunResult,

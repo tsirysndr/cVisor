@@ -12,7 +12,7 @@ export function PrimaryButton({ className = "", ...props }: ButtonProps) {
   return (
     <Button
       color="primary"
-      radius="none"
+      radius="sm"
       className={`font-medium text-primary-foreground shadow-[0_0_10px_rgba(255,42,109,0.55)] ${className}`}
       {...props}
     />
@@ -23,7 +23,7 @@ export function TextButton({ className = "", ...props }: ButtonProps) {
   return (
     <Button
       variant="light"
-      radius="none"
+      radius="sm"
       disableRipple
       className={`bg-transparent px-3 text-default-500 shadow-none data-[hover=true]:bg-transparent data-[hover=true]:text-primary ${className}`}
       {...props}

@@ -28,7 +28,12 @@ export function SettingsModal() {
   };
 
   return (
-    <Modal isOpen={open} onOpenChange={setOpen} backdrop="blur">
+    // Plain dark backdrop (no blur), matching the command palette overlay.
+    <Modal
+      isOpen={open}
+      onOpenChange={setOpen}
+      classNames={{ backdrop: "bg-black/60" }}
+    >
       <ModalContent>
         <ModalHeader>Connection settings</ModalHeader>
         <ModalBody className="pb-6">
