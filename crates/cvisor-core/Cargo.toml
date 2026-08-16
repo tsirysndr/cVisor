@@ -24,6 +24,10 @@ zstd = ["dep:zstd"]
 # S3 cache backend. Off by default (pulls a networking stack); enable for
 # `cache --backend s3://...`.
 s3 = ["dep:rust-s3"]
+# SQLite persistence (the `store` module) via sqlx. Off by default (async +
+# bundled C SQLite); the daemon enables it to persist sandbox state across
+# restarts. Not enabled for the pure-Rust FFI/CLI builds.
+sqlx = ["dep:sqlx", "dep:serde_json"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
@@ -40,3 +44,10 @@ flate2 = { workspace = true }
 zstd = { workspace = true, optional = true }
 ignore = { workspace = true }
 rust-s3 = { workspace = true, optional = true }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio", "sqlite",
+], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }

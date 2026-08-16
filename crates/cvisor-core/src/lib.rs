@@ -13,6 +13,8 @@ pub mod error;
 pub mod fileio;
 pub mod log_buffer;
 pub mod snapshot;
+#[cfg(feature = "sqlx")]
+pub mod store;
 pub mod types;
 
 pub mod procinfo;
