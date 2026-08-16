@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { getTransport, type CacheEntry, type Sandbox } from "../transport";
+import { useCacheDefaults } from "./useCaches";
 
 const PAGE_SIZE = 50;
 
@@ -45,8 +46,9 @@ export function useInfiniteSnapshots() {
 }
 
 export function useInfiniteCaches() {
-  return useInfinitePaged<CacheEntry>(["caches"], () =>
-    getTransport().cacheList(),
+  const { backend } = useCacheDefaults();
+  return useInfinitePaged<CacheEntry>(["caches", backend ?? ""], () =>
+    getTransport().cacheList(backend),
   );
 }
 

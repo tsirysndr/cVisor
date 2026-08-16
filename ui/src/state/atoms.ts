@@ -37,9 +37,14 @@ export const sandboxSettingsAtom = atom<string | null>(null);
 export type SnapshotPickerMode = "branch" | "rollback";
 export const snapshotPickerAtom = atom<SnapshotPickerMode | null>(null);
 
-// Terminal dock tabs: one tab per sandbox with an open terminal. Terminals for
-// every tab stay mounted so their sessions survive tab switches.
-export const terminalTabsAtom = atom<string[]>([]);
+// Terminal dock tabs. Each tab is its own PTY session; a sandbox can have any
+// number of tabs. Terminals for every tab stay mounted so their sessions
+// survive tab switches and panel show/hide.
+export interface TerminalTab {
+  id: string;
+  sandboxId: string;
+}
+export const terminalTabsAtom = atom<TerminalTab[]>([]);
 export const activeTerminalTabAtom = atom<string | null>(null);
 
 // Right-docked AI agent panel: a PTY running one of the pre-installed agent
@@ -53,6 +58,12 @@ export const agentTargetAtom = atomWithStorage<"sandbox" | "host">(
   "sandbox",
 );
 export const agentFullscreenAtom = atom(false);
+
+// Default cache store + archive format for cache operations. Empty backend =
+// the daemon's disk store; e.g. "s3://bucket/prefix" targets S3 (credentials
+// come from the daemon's AWS_* environment). Empty format = gzip.
+export const cacheBackendAtom = atomWithStorage("cvisor.cacheBackend", "");
+export const cacheFormatAtom = atomWithStorage("cvisor.cacheFormat", "");
 
 // Layout: left sidebar + bottom-docked terminal panel. Visibility + panel
 // height persist across reloads; fullscreen is transient.

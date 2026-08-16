@@ -19,12 +19,16 @@ import {
 const KEY = ["sandboxes"] as const;
 
 // A freed sandbox must vanish from the UI immediately: clear the selection and
-// close its terminal tab (unmounting the tab tears down the live session).
+// close its terminal tabs (unmounting a tab tears down its live session).
 function clearSelectedIf(id: string) {
   const store = getDefaultStore();
   if (store.get(selectedSandboxAtom) === id) store.set(selectedSandboxAtom, null);
-  store.set(terminalTabsAtom, (t) => t.filter((tab) => tab !== id));
-  if (store.get(activeTerminalTabAtom) === id) store.set(activeTerminalTabAtom, null);
+  store.set(terminalTabsAtom, (t) => t.filter((tab) => tab.sandboxId !== id));
+  const remaining = store.get(terminalTabsAtom);
+  const active = store.get(activeTerminalTabAtom);
+  if (active && !remaining.some((tab) => tab.id === active)) {
+    store.set(activeTerminalTabAtom, null);
+  }
 }
 
 export function useSandboxes() {

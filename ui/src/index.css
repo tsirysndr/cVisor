@@ -26,6 +26,16 @@ body {
 }
 
 /*
+ * Placeholders must read clearly as hints, not values: muted theme color at
+ * reduced opacity (the HeroUI var flips with the light/dark theme).
+ */
+input::placeholder,
+textarea::placeholder {
+  color: hsl(var(--heroui-default-400)) !important;
+  opacity: 0.65 !important;
+}
+
+/*
  * No focus rings on form controls: neither the WebKit native blue glow nor
  * HeroUI's focus-visible outline. Focused fields already read via their
  * border color change.

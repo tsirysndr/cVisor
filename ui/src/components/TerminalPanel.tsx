@@ -4,6 +4,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   IconArrowsMaximize,
   IconArrowsMinimize,
+  IconPlus,
   IconTerminal2,
   IconX,
 } from "@tabler/icons-react";
@@ -14,16 +15,20 @@ import {
   terminalHeightAtom,
   terminalPanelVisibleAtom,
   terminalTabsAtom,
+  type TerminalTab,
 } from "../state/atoms";
 import { useSandboxes } from "../hooks/useSandboxes";
 import { Terminal } from "./Terminal";
 
 const MIN_H = 140;
 
-// IDE-style bottom-docked terminal with one tab per sandbox. Every tab's
-// terminal stays mounted (hidden when inactive) so sessions survive switches.
-// Resizable by dragging its top edge; can go fullscreen; hidden when no tabs
-// are open or the panel is toggled off.
+const newTabId = () =>
+  `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+// IDE-style bottom-docked terminal. Each tab is an independent PTY session —
+// open as many per sandbox as you like via the + button. Every tab's terminal
+// stays mounted (hidden when inactive) so sessions survive tab switches and
+// panel show/hide. Resizable by dragging its top edge; can go fullscreen.
 export function TerminalPanel() {
   const selected = useAtomValue(selectedSandboxAtom);
   const setSelected = useSetAtom(selectedSandboxAtom);
@@ -34,44 +39,75 @@ export function TerminalPanel() {
   const [height, setHeight] = useAtom(terminalHeightAtom);
   const { data: sandboxes } = useSandboxes();
 
-  // Selecting a sandbox while the dock is visible opens (or focuses) its tab.
+  // Selecting a sandbox while the dock is visible focuses its most recent tab,
+  // opening a first one if none exists yet.
   useEffect(() => {
     if (!selected || !visible) return;
-    setTabs((t) => (t.includes(selected) ? t : [...t, selected]));
-    setActive(selected);
+    setTabs((t) => {
+      const existing = [...t].reverse().find((tab) => tab.sandboxId === selected);
+      if (existing) {
+        setActive((a) =>
+          t.some((tab) => tab.id === a && tab.sandboxId === selected)
+            ? a
+            : existing.id,
+        );
+        return t;
+      }
+      const tab: TerminalTab = { id: newTabId(), sandboxId: selected };
+      setActive(tab.id);
+      return [...t, tab];
+    });
   }, [selected, visible, setTabs, setActive]);
 
   // Drop tabs whose sandbox no longer exists (freed elsewhere).
   useEffect(() => {
     if (!sandboxes) return;
     const alive = new Set(sandboxes.map((s) => s.id));
-    setTabs((t) => (t.every((id) => alive.has(id)) ? t : t.filter((id) => alive.has(id))));
-    setActive((a) => (a && !alive.has(a) ? null : a));
-  }, [sandboxes, setTabs, setActive]);
+    setTabs((t) =>
+      t.every((tab) => alive.has(tab.sandboxId))
+        ? t
+        : t.filter((tab) => alive.has(tab.sandboxId)),
+    );
+  }, [sandboxes, setTabs]);
 
   // Hidden ≠ closed: when the panel is toggled off (or has no tabs yet) it
   // stays mounted with `hidden` so live terminal sessions survive show/hide.
   const shown = visible && tabs.length > 0;
-  const activeTab = active && tabs.includes(active) ? active : tabs[0];
+  const activeTab = tabs.find((t) => t.id === active) ?? tabs[0];
 
-  const label = (id: string) =>
+  const sandboxName = (id: string) =>
     sandboxes?.find((s) => s.id === id)?.name ?? id;
 
-  const focusTab = (id: string) => {
-    setActive(id);
-    setSelected(id);
+  // Tabs of the same sandbox get an index suffix: name, name ·2, name ·3 …
+  const label = (tab: TerminalTab) => {
+    const peers = tabs.filter((t) => t.sandboxId === tab.sandboxId);
+    const i = peers.findIndex((t) => t.id === tab.id);
+    const name = sandboxName(tab.sandboxId);
+    return i > 0 ? `${name} ·${i + 1}` : name;
+  };
+
+  const focusTab = (tab: TerminalTab) => {
+    setActive(tab.id);
+    setSelected(tab.sandboxId);
+  };
+
+  const openTab = (sandboxId: string) => {
+    const tab: TerminalTab = { id: newTabId(), sandboxId };
+    setTabs((t) => [...t, tab]);
+    setActive(tab.id);
+    setSelected(sandboxId);
   };
 
   const closeTab = (id: string) => {
-    const next = tabs.filter((t) => t !== id);
+    const next = tabs.filter((t) => t.id !== id);
     setTabs(next);
     if (next.length === 0) {
       setActive(null);
       setFullscreen(false);
       setVisible(false);
-    } else if (activeTab === id) {
+    } else if (activeTab?.id === id) {
       // Focus the neighbor: same index if one follows, else the new last tab.
-      const i = tabs.indexOf(id);
+      const i = tabs.findIndex((t) => t.id === id);
       focusTab(next[Math.min(i, next.length - 1)]);
     }
   };
@@ -120,22 +156,22 @@ export function TerminalPanel() {
       <div className="flex h-8 shrink-0 items-center border-b border-content3 bg-content1 pr-1">
         <IconTerminal2 size={14} className="mx-2 shrink-0 text-secondary" />
         <div className="flex min-w-0 flex-1 items-stretch gap-px self-stretch overflow-x-auto">
-          {tabs.map((id) => (
+          {tabs.map((tab) => (
             <div
-              key={id}
-              onClick={() => focusTab(id)}
+              key={tab.id}
+              onClick={() => focusTab(tab)}
               className={`group/tab flex cursor-pointer items-center gap-1.5 whitespace-nowrap px-3 text-xs transition ${
-                id === activeTab
+                tab.id === activeTab?.id
                   ? "border-b-2 border-primary bg-content2 text-foreground"
                   : "text-default-500 hover:bg-content2 hover:text-foreground"
               }`}
             >
-              <span className="max-w-40 truncate">{label(id)}</span>
+              <span className="max-w-40 truncate">{label(tab)}</span>
               <button
-                aria-label={`Close ${label(id)} terminal`}
+                aria-label={`Close ${label(tab)} terminal`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  closeTab(id);
+                  closeTab(tab.id);
                 }}
                 className="grid h-4 w-4 place-items-center rounded-sm text-default-400 opacity-0 transition hover:bg-content3 hover:text-danger group-hover/tab:opacity-100"
               >
@@ -143,6 +179,18 @@ export function TerminalPanel() {
               </button>
             </div>
           ))}
+          <Tooltip content="New terminal for this sandbox">
+            <button
+              aria-label="New terminal tab"
+              onClick={() => {
+                const target = activeTab?.sandboxId ?? selected;
+                if (target) openTab(target);
+              }}
+              className="grid w-7 shrink-0 place-items-center self-center rounded-sm text-default-400 transition hover:bg-content2 hover:text-foreground"
+            >
+              <IconPlus size={14} />
+            </button>
+          </Tooltip>
         </div>
         <div className="ml-1 flex shrink-0 items-center gap-0.5">
           <Tooltip content={fullscreen ? "Exit fullscreen" : "Fullscreen"}>
@@ -180,12 +228,12 @@ export function TerminalPanel() {
       </div>
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {tabs.map((id) => (
+        {tabs.map((tab) => (
           <div
-            key={id}
-            className={id === activeTab ? "h-full" : "hidden"}
+            key={tab.id}
+            className={tab.id === activeTab?.id ? "h-full" : "hidden"}
           >
-            <Terminal sandboxId={id} />
+            <Terminal sandboxId={tab.sandboxId} />
           </div>
         ))}
       </div>

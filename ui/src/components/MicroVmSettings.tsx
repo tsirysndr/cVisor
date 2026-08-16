@@ -78,7 +78,7 @@ export function MicroVmSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-3 border-t border-content3 pt-4">
+    <div className="flex h-full flex-col gap-3">
       <div>
         <h3 className="text-sm font-semibold">Sandbox microVM (bsdkrun)</h3>
         <p className="text-xs text-default-500">
@@ -110,6 +110,7 @@ export function MicroVmSettings() {
           radius="sm"
           size="sm"
           placeholder="ghcr.io/…/cvisor:custom"
+          className="col-span-2"
           value={image}
           onValueChange={setImage}
         />
@@ -146,9 +147,14 @@ export function MicroVmSettings() {
         />
       </div>
       {error && <p className="text-sm text-danger">{error}</p>}
-      <div className="flex items-center gap-3">
-        <PrimaryButton size="sm" isLoading={saving} onPress={() => void save()}>
-          Save microVM settings
+      {/* mt-auto pins the action row to the bottom of the settings section. */}
+      <div className="mt-auto flex items-center gap-3">
+        <PrimaryButton
+          isLoading={saving}
+          className="flex-1"
+          onPress={() => void save()}
+        >
+          Save
         </PrimaryButton>
         {saved && <span className="text-xs text-success">saved</span>}
       </div>

@@ -63,13 +63,21 @@ FROM alpine:latest
 #   - uv: Python package/project manager (+ uvx); Python via python3
 #   - elixir (pulls erlang, which gleam also needs) and gleam
 RUN apk add --no-cache \
-      bash curl git ca-certificates \
+      bash curl git ca-certificates tmux \
       python3 py3-pip \
       mise \
       elixir \
       gleam
 # uv isn't packaged for Alpine; copy the static musl binaries from its image.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# bun (+bunx) from its official musl image.
+COPY --from=oven/bun:alpine /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -s bun /usr/local/bin/bunx
+# deno has no musl build; its alpine image bundles a private glibc runtime
+# (loader + libs), which we copy alongside the binary.
+COPY --from=denoland/deno:alpine /lib/ld-linux-* /lib/
+COPY --from=denoland/deno:alpine /usr/local/lib/glibc /usr/local/lib/glibc
+COPY --from=denoland/deno:alpine /bin/deno /usr/local/bin/deno
 # AI coding agents: claude, codex, gemini, opencode, kilo ship as npm CLIs. (amp is
 # glibc-only — its native binary aborts even under gcompat — so it is only in
 # the Debian/Ubuntu images.) libgcc/libstdc++ + a system ripgrep cover the

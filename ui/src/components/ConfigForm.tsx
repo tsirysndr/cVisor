@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { IconEye, IconEyeOff } from "@tabler/icons-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -36,6 +37,7 @@ export function ConfigForm({
 }) {
   const setConfig = useSetAtom(configAtom);
   const [connError, setConnError] = useState<string | null>(null);
+  const [showToken, setShowToken] = useState(false);
   const wsEdited = useRef(false);
   // The desktop build talks gRPC over Tauri; the URL field is the daemon's gRPC
   // address and there is no separate websocket endpoint.
@@ -74,7 +76,7 @@ export function ConfigForm({
   });
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+    <form onSubmit={onSubmit} className="flex h-full flex-col gap-4">
       <Input {...plainTextField}
         {...register("graphqlUrl")}
         label={desktop ? "Daemon gRPC URL" : "GraphQL URL"}
@@ -100,18 +102,29 @@ export function ConfigForm({
       <Input {...plainTextField}
         {...register("token")}
         label="Token"
-        type="password"
+        type={showToken ? "text" : "password"}
         variant="bordered"
         radius="sm"
         placeholder="bearer token"
         isInvalid={!!errors.token}
         errorMessage={errors.token?.message}
+        endContent={
+          <button
+            type="button"
+            aria-label={showToken ? "Hide token" : "Show token"}
+            className="text-default-400 transition hover:text-foreground"
+            onClick={() => setShowToken((v) => !v)}
+          >
+            {showToken ? <IconEyeOff size={18} /> : <IconEye size={18} />}
+          </button>
+        }
       />
 
       {connError && <p className="text-sm text-danger">{connError}</p>}
 
-      {/* Paired action rows split evenly so both buttons match in width. */}
-      <div className={onDisconnect ? "grid grid-cols-2 gap-2" : "flex"}>
+      {/* Paired action rows split evenly so both buttons match in width;
+          mt-auto pins them to the bottom of the settings section. */}
+      <div className={onDisconnect ? "mt-auto grid grid-cols-2 gap-2" : "mt-auto flex"}>
         {onDisconnect && (
           <TextButton
             type="button"
