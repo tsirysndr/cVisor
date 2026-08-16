@@ -40,7 +40,18 @@ RUN cargo build -p cvisor-daemon --bin cvisord --release --features zstd,s3
 
 FROM alpine:3.20
 # Tools available to sandboxed commands (busybox provides /bin/sh, which the
-# guest execs). Add anything your workloads need here.
+# guest execs). Add anything else your workloads need here.
+#   - mise: polyglot version manager (installs more toolchains at runtime)
+#   - uv: Python package/project manager (+ uvx); Python via python3
+#   - elixir (pulls erlang, which gleam also needs) and gleam
+RUN apk add --no-cache \
+      bash curl git ca-certificates \
+      python3 py3-pip \
+      mise \
+      elixir \
+      gleam
+# uv isn't packaged for Alpine; copy the static musl binaries from its image.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 COPY --from=build /src/target/release/cvisor /usr/local/bin/cvisor
 COPY --from=build /src/target/release/cvisord /usr/local/bin/cvisord
 # gRPC and GraphQL, respectively (the daemon binds 0.0.0.0 by default).
