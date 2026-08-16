@@ -38,7 +38,7 @@ ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=gcc \
 RUN cargo build -p cvisor-cli --bin cvisor --release --features zstd,s3
 RUN cargo build -p cvisor-daemon --bin cvisord --release --features zstd,s3
 
-FROM alpine:3.20
+FROM alpine:latest
 # Tools available to sandboxed commands (busybox provides /bin/sh, which the
 # guest execs). Add anything else your workloads need here.
 #   - mise: polyglot version manager (installs more toolchains at runtime)
