@@ -4,10 +4,6 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Image tag to publish (default: latest)"
-        default: latest
 
 permissions:
   contents: read
@@ -15,8 +11,24 @@ permissions:
 
 jobs:
   build-push:
-    name: build & push ghcr.io/tsirysndr/cvisor
+    name: ${{ matrix.variant }} → ghcr.io/tsirysndr/cvisor
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Alpine (default): cvisor:latest, cvisor:<version>
+          - variant: alpine
+            dockerfile: Dockerfile
+            prefix: ""
+          # Debian trixie: cvisor:trixie-latest, cvisor:trixie-<version>
+          - variant: debian-trixie
+            dockerfile: Dockerfile.debian
+            prefix: trixie-
+          # Ubuntu 26.04: cvisor:ubuntu-latest, cvisor:ubuntu-<version>
+          - variant: ubuntu
+            dockerfile: Dockerfile.ubuntu
+            prefix: ubuntu-
     steps:
       - uses: actions/checkout@v4
 
@@ -30,24 +42,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # On a v* tag: publish the version (e.g. 1.2.3) and `latest`.
-      # On workflow_dispatch: publish the input tag (default `latest`).
+      # `<prefix>latest` on a tag push or a manual run, plus `<prefix><version>`
+      # from a v* tag: e.g. latest / 1.2.3, trixie-latest / trixie-1.2.3,
+      # ubuntu-latest / ubuntu-1.2.3.
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/tsirysndr/cvisor
           tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
-            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=${{ matrix.prefix }}latest,enable=${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern=${{ matrix.prefix }}{{version}}
 
       - name: Build and push (amd64 + arm64)
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
