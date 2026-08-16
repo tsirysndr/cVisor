@@ -23,9 +23,9 @@ RUN bun run build
 # (a glibc host, so the vendored one would also work — this is just explicit).
 FROM rust:bookworm AS chef
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      perl pkg-config protobuf-compiler \
-    && rm -rf /var/lib/apt/lists/* \
-    && cargo install cargo-chef --locked
+  perl pkg-config protobuf-compiler \
+  && rm -rf /var/lib/apt/lists/* \
+  && cargo install cargo-chef --locked
 WORKDIR /src
 
 # The recipe is a manifest-only digest of the workspace: it changes when
@@ -40,7 +40,7 @@ FROM chef AS build
 # cached artifacts don't apply.
 COPY --from=planner /src/recipe.json recipe.json
 RUN cargo chef cook --release -p cvisor-cli --features zstd,s3 --recipe-path recipe.json \
- && cargo chef cook --release -p cvisor-daemon --features zstd,s3 --recipe-path recipe.json
+  && cargo chef cook --release -p cvisor-daemon --features zstd,s3 --recipe-path recipe.json
 COPY . .
 # Overlay the built web assets so the embedded UI isn't the placeholder.
 COPY --from=web /src/ui/dist ui/dist
@@ -52,10 +52,10 @@ FROM debian:trixie-slim
 # Tools available to sandboxed commands. elixir pulls erlang (which gleam needs).
 # The binary is built on bookworm (older glibc), which runs on trixie's newer one.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash curl git ca-certificates tmux \
-      python3 python3-pip python3-venv \
-      elixir \
-    && rm -rf /var/lib/apt/lists/*
+  bash curl git ca-certificates tmux \
+  python3 python3-pip python3-venv \
+  elixir \
+  && rm -rf /var/lib/apt/lists/*
 # bun (+bunx) and deno from their official images (glibc builds).
 COPY --from=oven/bun:latest /usr/local/bin/bun /usr/local/bin/bun
 RUN ln -s bun /usr/local/bin/bunx
@@ -65,24 +65,6 @@ RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
 # uv (+uvx) and gleam aren't in the base repos; copy their static binaries.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 COPY --from=ghcr.io/gleam-lang/gleam:v1.15.0-erlang-alpine /bin/gleam /usr/local/bin/gleam
-# AI coding agents: claude, codex, gemini, opencode, amp, kilo ship as npm CLIs.
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm unzip \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g --no-fund --no-audit \
-      @anthropic-ai/claude-code \
-      @openai/codex \
-      @google/gemini-cli \
-      opencode-ai \
-      @sourcegraph/amp \
-      @kilocode/cli \
-    && npm cache clean --force
-# Kiro CLI is not on npm; install its release binaries from the official zip.
-RUN curl -fsSL "https://prod.download.cli.kiro.dev/stable/latest/kirocli-$(uname -m)-linux.zip" \
-      -o /tmp/kirocli.zip \
-    && unzip -q /tmp/kirocli.zip -d /tmp \
-    && install -m755 /tmp/kirocli/bin/kiro-cli /tmp/kirocli/bin/kiro-cli-chat \
-      /tmp/kirocli/bin/kiro-cli-term /usr/local/bin/ \
-    && rm -rf /tmp/kirocli /tmp/kirocli.zip
 COPY --from=build /src/target/release/cvisor /usr/local/bin/cvisor
 COPY --from=build /src/target/release/cvisord /usr/local/bin/cvisord
 # gRPC and GraphQL, respectively (the daemon binds 0.0.0.0 by default).
