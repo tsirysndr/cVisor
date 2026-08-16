@@ -55,7 +55,7 @@ export const agentPanelVisibleAtom = atomWithStorage("cvisor.agentPanel", false)
 export const agentCliAtom = atomWithStorage("cvisor.agentCli", "claude");
 export const agentTargetAtom = atomWithStorage<"sandbox" | "host">(
   "cvisor.agentTarget",
-  "sandbox",
+  "host",
 );
 export const agentFullscreenAtom = atom(false);
 

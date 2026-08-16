@@ -1,4 +1,4 @@
-import { Button, Select, SelectItem, Tab, Tabs, Tooltip } from "@heroui/react";
+import { Button, Select, SelectItem, Tooltip } from "@heroui/react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   IconArrowsMaximize,
@@ -10,7 +10,6 @@ import {
   agentCliAtom,
   agentFullscreenAtom,
   agentPanelVisibleAtom,
-  agentTargetAtom,
   selectedSandboxAtom,
 } from "../state/atoms";
 import { useSandboxes } from "../hooks/useSandboxes";
@@ -36,15 +35,15 @@ export const AGENT_CLIS = [
 export function AgentPanel() {
   const setVisible = useSetAtom(agentPanelVisibleAtom);
   const [cli, setCli] = useAtom(agentCliAtom);
-  const [target, setTarget] = useAtom(agentTargetAtom);
   const selected = useAtomValue(selectedSandboxAtom);
   const [fullscreen, setFullscreen] = useAtom(agentFullscreenAtom);
   const { data: sandboxes } = useSandboxes();
 
   const agent = AGENT_CLIS.find((a) => a.key === cli) ?? AGENT_CLIS[0];
   const sandbox = sandboxes?.find((s) => s.id === selected);
-  // Host PTYs only exist on the desktop.
-  const host = target === "host" && isTauri();
+  // The sandbox/host target switch is temporarily hidden; the panel always runs
+  // the agent on the host. Host PTYs only exist on the desktop.
+  const host = isTauri();
 
   return (
     <aside
@@ -72,18 +71,6 @@ export function AgentPanel() {
             <SelectItem key={a.key}>{a.label}</SelectItem>
           ))}
         </Select>
-        {isTauri() && (
-          <Tabs
-            aria-label="Agent target"
-            size="sm"
-            radius="sm"
-            selectedKey={target}
-            onSelectionChange={(k) => setTarget(k as "sandbox" | "host")}
-          >
-            <Tab key="sandbox" title="Sandbox" />
-            <Tab key="host" title="Host" />
-          </Tabs>
-        )}
         <span className="min-w-0 flex-1 truncate text-right text-[11px] text-default-400">
           {host
             ? "on this machine"
