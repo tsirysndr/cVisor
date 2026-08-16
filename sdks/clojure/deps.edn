@@ -5,6 +5,8 @@
  {:test    {:extra-paths ["test"]
             :jvm-opts    ["--enable-native-access=ALL-UNNAMED"]
             :main-opts   ["-m" "cvisor.sandbox-test"]}
+  :remote  {:extra-paths ["test"]
+            :main-opts   ["-m" "cvisor.remote-smoke"]}
   :console {:extra-paths ["dev"]
             :extra-deps  {com.bhauman/rebel-readline {:mvn/version "0.1.5"}}
             :jvm-opts    ["--enable-native-access=ALL-UNNAMED"]

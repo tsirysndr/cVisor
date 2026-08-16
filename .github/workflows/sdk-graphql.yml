@@ -1,0 +1,193 @@
+name: sdk-graphql
+
+on:
+  push:
+    branches: [main, rewrite-in-rust]
+  pull_request:
+
+concurrency:
+  group: sdk-graphql-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  graphql:
+    name: sdk graphql e2e (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: sdk-graphql-${{ matrix.arch }}
+
+      # Native glibc build of the daemon (no musl, no cross). The daemon always
+      # enables cvisor-core's sqlx store, so no extra feature flags are needed.
+      # cvisor-proto's build.rs uses a vendored (glibc) protoc, so no protoc
+      # install is required on the glibc runner.
+      - name: Build cvisord (${{ matrix.arch }}, release)
+        run: cargo build -p cvisor-daemon --bin cvisord --release
+
+      # Boot the freshly built glibc binary inside an ubuntu container so the
+      # sandbox has seccomp/apparmor unconfined (the daemon's `run` mutation
+      # forks a real cVisor sandbox). Host network exposes GraphQL on :8080.
+      - name: Start cvisord
+        run: |
+          docker run -d --name cvisord --network host \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            -e CVISOR_TOKEN=test-token \
+            -e CVISOR_HTTP_ADDR=0.0.0.0:8080 \
+            -e CVISOR_DB=/tmp/cv.db \
+            -v "$PWD/target/release/cvisord:/usr/local/bin/cvisord:ro" \
+            ubuntu:latest cvisord
+          # Wait for the GraphQL endpoint to answer a health query (up to ~30s).
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS -X POST http://127.0.0.1:8080/graphql \
+                 -H 'Content-Type: application/json' \
+                 -H 'Authorization: Bearer test-token' \
+                 -d '{"query":"{ health { ok } }"}' 2>/dev/null | grep -q '"ok":true'; then
+              up=1
+              echo "cvisord is up (after ${i}s)"
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "$up" ]; then
+            echo "cvisord did not become ready" >&2
+            docker logs cvisord || true
+            exit 1
+          fi
+
+      # Every SDK step below runs its remote-GraphQL smoke in the matching
+      # language container on the host network (pure HTTP client — no libcvisor,
+      # so no seccomp/apparmor opts needed) and greps for the OK marker.
+
+      - name: Python SDK (RemoteSandbox, uv)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token -e UV_CACHE_DIR=/tmp/uvcache \
+            -v "$PWD/sdks/python:/sdk" -w /sdk \
+            ghcr.io/astral-sh/uv:python3.12-alpine \
+            uv run --no-project python remote_smoke.py 2>&1 | tee smoke.log
+          grep -q PY_GRAPHQL_OK smoke.log
+
+      - name: Ruby SDK (RemoteSandbox, net/http)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token \
+            -v "$PWD/sdks/ruby:/sdk" -w /sdk \
+            ruby:alpine ruby test/remote_smoke.rb 2>&1 | tee smoke.log
+          grep -q RUBY_GRAPHQL_OK smoke.log
+
+      - name: Node/Bun SDK (RemoteSandbox over fetch)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token \
+            -v "$PWD/sdks/node:/sdk" -w /sdk \
+            oven/bun:alpine bun test-remote.ts 2>&1 | tee smoke.log
+          grep -q NODE_GRAPHQL_OK smoke.log
+
+      - name: Deno SDK (RemoteSandbox over fetch)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token \
+            -v "$PWD/sdks/node:/sdk" -w /sdk \
+            --entrypoint sh denoland/deno:alpine \
+            -c 'deno run --allow-net --allow-env --unstable-sloppy-imports test-remote.ts' 2>&1 | tee smoke.log
+          grep -q NODE_GRAPHQL_OK smoke.log
+
+      - name: Erlang SDK (cvisor_remote, httpc)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token \
+            -v "$PWD/sdks/erlang:/sdk" -w /sdk \
+            erlang:alpine sh -c '
+              mkdir -p ebin &&
+              erlc -o ebin src/cvisor_graphql.erl src/cvisor_remote.erl test/cvisor_remote_smoke.erl &&
+              erl -noshell -pa ebin -eval "cvisor_remote_smoke:run()" -s init stop' 2>&1 | tee smoke.log
+          grep -q ERLANG_GRAPHQL_OK smoke.log
+
+      - name: Elixir SDK (Cvisor.Remote, :httpc)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token \
+            -v "$PWD/sdks/elixir:/sdk" -w /sdk \
+            elixir:otp-27-alpine elixir remote_smoke.exs 2>&1 | tee smoke.log
+          grep -q ELIXIR_GRAPHQL_OK smoke.log
+
+      # Gleam consumes the Erlang runtime as a path dep (../erlang), so mount the
+      # whole sdks/ tree. `gleam run` fetches the pure-HTTP hex deps and compiles;
+      # the smoke starts inets/ssl itself, so it needs no NIF and no build tools.
+      - name: Gleam SDK (cvisor/remote, gleam_httpc)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token \
+            -v "$PWD/sdks:/sdks" -w /sdks/gleam \
+            ghcr.io/gleam-lang/gleam:v1.15.0-erlang-alpine \
+            sh -c 'gleam run -m remote_smoke' 2>&1 | tee smoke.log
+          grep -q GLEAM_GRAPHQL_OK smoke.log
+
+      # Java FFM image; the smoke is pure JDK HTTP (no FFM/native access needed).
+      # Install the Clojure CLI on first run, like the FFI SDK job does.
+      - name: Clojure SDK (cvisor.remote, java.net.http)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token \
+            -v "$PWD/sdks/clojure:/sdk" -w /sdk \
+            --entrypoint sh bellsoft/liberica-openjdk-alpine-musl:22 -c '
+              apk add --no-cache bash curl >/dev/null 2>&1 &&
+              curl -sLO https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh &&
+              bash linux-install.sh >/dev/null 2>&1 &&
+              clojure -M:remote' 2>&1 | tee smoke.log
+          grep -q CLOJURE_GRAPHQL_OK smoke.log
+
+      # Pure-stdlib Go client — build with CGO disabled so the cgo-only native
+      # sandbox files are excluded and no libcvisor is needed.
+      - name: Go SDK (RemoteSandbox, net/http)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token -e CGO_ENABLED=0 -e GOCACHE=/tmp/gocache \
+            -v "$PWD/sdks/go:/sdk" -w /sdk \
+            golang:1.22-alpine go run ./cmd/remote_smoke 2>&1 | tee smoke.log
+          grep -q GO_GRAPHQL_OK smoke.log
+
+      # The Rust crate's Linux build pulls cvisor-core as a path dep, so mount the
+      # whole repo. The example only uses the ureq-backed GraphQL client. Use the
+      # full rust image (glibc + gcc) so ring/rustls and cvisor-core link.
+      - name: Rust SDK (RemoteSandbox, ureq)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token -e CARGO_TERM_COLOR=always \
+            -v "$PWD:/repo" -w /repo/sdks/rust \
+            rust:latest cargo run --example remote_smoke 2>&1 | tee smoke.log
+          grep -q RUST_GRAPHQL_OK smoke.log
+
+      - name: cvisord logs + teardown
+        if: always()
+        run: |
+          docker logs cvisord || true
+          docker rm -f cvisord || true
