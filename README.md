@@ -1,17 +1,75 @@
-### cVisor - Embedded Bash Sandbox for Agents
+# cVisor — an in-process Linux sandbox for untrusted & LLM-generated code
 [![CI](https://github.com/tsirysndr/bVisor/actions/workflows/ci.yml/badge.svg)](https://github.com/tsirysndr/bVisor/actions/workflows/ci.yml)
 
-cVisor is an SDK and runtime for safely executing bash commands locally, without the need for remote sandboxes or local VMs/containers. 
+cVisor safely runs untrusted or LLM-generated code — no VM, no container. Inspired
+by [gVisor](https://github.com/google/gVisor), it isolates programs by intercepting
+and virtualizing [Linux syscalls](https://en.wikipedia.org/wiki/System_call) from
+userspace ([seccomp user-notifier](https://man7.org/linux/man-pages/man2/seccomp.2.html)),
+spinning up a sandbox in **~2 ms** — ideal for the ephemeral tasks agents run, like
+code execution and filesystem operations.
 
-Inspired by [gVisor](https://github.com/google/gVisor), cVisor runs programs directly on the host machine, providing isolation by intercepting and virtualizing [Linux syscalls](https://en.wikipedia.org/wiki/System_call) from userspace. 
+Unlike gVisor, cVisor runs **in-process**. Use it three ways: embed it via a **CLI**
+and **10-language SDKs**, or run it as a **daemon** (`cvisord`) exposing the full
+runtime over **gRPC + GraphQL** with a **web & desktop UI** — so you can drive Linux
+sandboxes from any host, macOS included.
 
-Unlike gVisor, cVisor is built to run directly in your application, spinning up sandboxes in ~2 milliseconds. This makes it ideal for ephemeral tasks commonly performed by LLM agents, such as code execution or filesystem operations.
+**Status**: past proof-of-concept and moving fast, but still pre-1.0 — not yet
+recommended for production. If cVisor's behavior diverges from the Linux kernel,
+please file an issue.
 
-**Status**: cVisor is an early proof-of-concept and should not yet be used in production. If you detect any discrepancies between cVisor's behavior and the linux kernel, please file an issue.
+**Compatibility**: the sandbox **runtime** is Linux-only (ARM & x86, glibc & musl).
+**Clients aren't** — every SDK, the CLI's `--remote` mode, and the web UI can drive a
+remote `cvisord` over gRPC/GraphQL from **any OS, including macOS**.
 
-**Compatibility**: cVisor currently ships for Linux hosts only, with support for ARM and X86 architectures and glibc/musl ABIs.
+> **Note**: cVisor is a fork of [bVisor](https://github.com/butter-dot-dev/bVisor),
+> rewritten in **Rust** (the original is written in Zig).
 
-> **Note**: cVisor is a fork of [bVisor](https://github.com/butter-dot-dev/bVisor), rewritten in **Rust** (the original is written in Zig).
+## Table of Contents
+
+- [Features](#features)
+- [Quick try](#quick-try)
+- [Usage](#usage)
+- [Command-line](#command-line)
+  - [Docker](#docker)
+  - [Nix](#nix)
+- [Daemon (`cvisord`)](#daemon-cvisord)
+- [Web & desktop UI](#web--desktop-ui)
+- [SDKs](#sdks)
+- [Examples](#examples)
+- [Architecture](#architecture)
+- [Syscall Support](#syscall-support)
+- [Development Guide](#development-guide)
+
+## Features
+
+- **Fast, in-process isolation** — a seccomp user-notifier virtualizes syscalls;
+  sandboxes start in ~2 ms with no VM or container, and unsandboxed syscalls run
+  natively.
+- **Virtualized filesystem** — a copy-on-write overlay per sandbox (tombstones,
+  symlinks, virtual `/proc`); read/write/copy files and whole directory trees in
+  and out (`.gitignore`/`.dockerignore`-aware).
+- **Resource limits & policy** — cgroup v2 memory / pids / CPU caps, a per-run
+  timeout, an outbound-network kill switch, opt-in inbound `listen`, and guest
+  env vars.
+- **Snapshots** — capture a sandbox's filesystem, **branch** a fresh sandbox from a
+  snapshot, or **roll back** to one.
+- **Directory cache** — keyed backup/restore (gzip / estargz / zstd / none) to the
+  host disk or **S3**.
+- **Sessions & PTY** — stream a command's output, or run an interactive shell with
+  job control and `isatty`.
+- **`cvisor` CLI** — run a command, drop into a sandboxed shell, `cp`, `cache`,
+  `snapshot`/`branch`/`rollback`, `doctor`; `--remote` drives a daemon; `cvisor ui`
+  serves the embedded web UI.
+- **`cvisord` daemon** — gRPC + GraphQL over one runtime, guarded by a bearer token
+  (with anonymous reflection/introspection); a sandbox registry with Docker-style
+  names, plus **SQLite persistence** (FTS5 + pagination) so sandboxes survive
+  restarts.
+- **Web & desktop UI** — a React app (terminal, command palette, synthwave theme);
+  the web build talks GraphQL, the Tauri desktop app talks gRPC.
+- **10-language SDKs** — Node/Bun/Deno, Python, Ruby, Erlang, Elixir, Gleam,
+  Clojure, Go, Rust: native FFI on Linux, a GraphQL client to a daemon on any OS.
+- **Ships everywhere** — static binaries, Alpine / Debian / Ubuntu Docker images,
+  and a Nix flake.
 
 ## Quick try
 
@@ -65,8 +123,10 @@ Unsafe commands are blocked:
 sb.runCmd("chroot /tmp"); // error
 ```
 
-Python, Ruby, Erlang, Clojure, Bun, and Deno SDKs are also published — see
-[sdks/README.md](sdks/README.md).
+SDKs for **10 languages** (Python, Ruby, Erlang, Elixir, Gleam, Clojure, Go,
+Rust, plus Bun/Deno alongside Node) are published — and each can also drive a
+remote daemon over GraphQL from any OS, macOS included. See the
+[SDKs](#sdks) section and [sdks/README.md](sdks/README.md).
 
 ## Command-line
 
@@ -163,6 +223,50 @@ Nix config. Alternatively, add it to `nix.conf` (or a flake `nixConfig`) by hand
 extra-substituters = https://cvisor.cachix.org
 extra-trusted-public-keys = cvisor.cachix.org-1:<key shown by `cachix use cvisor`>
 ```
+
+## Daemon (`cvisord`)
+
+Run cVisor as a network service: `cvisord` exposes the full runtime over gRPC
+(`:50051`) and GraphQL (`:8080`), guarded by a bearer token (`CVISOR_TOKEN`, else
+auto-generated and printed at startup). Sandboxes get Docker-style ids/names and
+persist in SQLite (with FTS5 search + pagination) across restarts.
+
+```bash
+docker run --rm --security-opt seccomp=unconfined \
+  -p 50051:50051 -p 8080:8080 -e CVISOR_TOKEN=change-me \
+  --entrypoint cvisord ghcr.io/tsirysndr/cvisor
+```
+
+Then drive it from the CLI or any SDK:
+
+```bash
+cvisor --remote localhost:50051 --token change-me -- uname -a   # gRPC client
+# GraphQL at http://localhost:8080/graphql
+```
+
+gRPC reflection and GraphQL introspection are open (anonymous) so tools like
+`grpcurl` / GraphiQL can discover the schema; every actual operation requires the
+token. See [crates/cvisor-daemon](crates/cvisor-daemon).
+
+## Web & desktop UI
+
+`cvisor ui` serves an embedded React web app — sandbox list, a live terminal,
+snapshots/caches, and a `/` command palette — that talks to a daemon over GraphQL:
+
+```bash
+cvisor ui --daemon http://localhost:8080 --token change-me
+```
+
+A Tauri desktop build of the same app talks to the daemon over gRPC instead. See
+[ui/](ui).
+
+## SDKs
+
+cVisor ships SDKs in **10 languages** — Node/Bun/Deno, Python, Ruby, Erlang,
+Elixir, Gleam, Clojure, Go, and Rust. On Linux they wrap the native runtime
+(FFI/NIF over `libcvisor`); on any OS — **macOS included** — they also expose a
+GraphQL client and a `RemoteSandbox` that drives a `cvisord` daemon. See
+[sdks/README.md](sdks/README.md).
 
 ## Examples
 
