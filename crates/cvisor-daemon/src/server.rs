@@ -63,6 +63,9 @@ pub fn run_http(addr: SocketAddr, reg: Arc<Registry>, auth: Arc<Auth>) -> std::i
         let schema = graphql::schema(reg);
         HttpServer::new(move || {
             App::new()
+                // Allow any origin/method/header so browser UIs on other origins
+                // (the web app, GraphiQL, the CLI's `cvisor ui`) can call in.
+                .wrap(actix_cors::Cors::permissive())
                 .app_data(web::Data::new(schema.clone()))
                 .app_data(web::Data::new(auth.clone()))
                 .route("/graphql", web::post().to(graphql::graphql_handler))
