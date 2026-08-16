@@ -134,6 +134,45 @@ puts buf.join
 - `#kill`: SIGKILL the session's process.
 - `#close`: free the session (idempotent).
 
+## Remote daemon (GraphQL) — works on macOS
+
+The `Sandbox` above needs the native `libcvisor` (Linux only). To use cVisor
+from **any** platform, including macOS, talk to a running
+[`cvisord`](../../crates/cvisor-daemon) over its GraphQL API. This path is pure
+stdlib (`net/http` + `json`) — no native library — and `require "cvisor"` never
+loads the `.so`:
+
+```ruby
+require "cvisor"
+
+remote = Cvisor::RemoteSandbox.new("http://127.0.0.1:8080/graphql", token)
+out = remote.run("echo hello")
+puts out["stdout"]                          # "hello\n"
+
+sb = remote.create_sandbox("my-box")
+remote.write_file(sb["id"], "/app/x", "hi") # base64 handled for you
+remote.read_file(sb["id"], "/app/x")        # "hi"
+snap = remote.snapshot(sb["id"])
+remote.fork(sb["id"], "clone")
+remote.free_sandbox(sb["id"])
+```
+
+`RemoteSandbox` mirrors the daemon surface: `#run`, `#create_sandbox` /
+`#list_sandboxes` / `#free_sandbox` / `#configure`, `#write_file` / `#read_file`,
+`#cache_save` / `#cache_restore` / `#cache_list`, `#snapshot` / `#rollback` /
+`#branch` / `#fork` / `#snapshots` / `#delete_snapshot`, and `#health`. For raw
+documents, drop to the client:
+
+```ruby
+gql = Cvisor::GraphQL.new("http://127.0.0.1:8080/graphql", token)
+data = gql.query("{ sandboxes { id name } }")
+gql.mutate("mutation($c:String!){ run(command:$c){ stdout } }", { "c" => "uname -a" })
+```
+
+The daemon prints its bearer `token` on startup (or set `CVISOR_TOKEN`). On a
+non-Linux host, constructing the FFI `Cvisor::Sandbox` raises a clear
+"Linux-only" error pointing you here.
+
 ## Interactive console
 
 Launch an IRB session with a live sandbox preloaded:

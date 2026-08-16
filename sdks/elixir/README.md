@@ -63,6 +63,42 @@ Cvisor.new()
 Each builder returns an updated `Cvisor` struct, so they chain; the
 configuration is applied to the shared runtime when `run/2` executes.
 
+## Remote daemon (GraphQL) — works on macOS
+
+The `Cvisor` runtime above needs the native `libcvisor` (Linux only). To use
+cVisor from **any** platform, including macOS, talk to a running
+[`cvisord`](../../crates/cvisor-daemon) over its GraphQL API. `Cvisor.Remote`
+and `Cvisor.GraphQL` are pure OTP (`:httpc` + the OTP-27 `:json` module) — no
+NIF, no extra Hex deps — so they work without `libcvisor`:
+
+```elixir
+remote = Cvisor.Remote.connect("http://127.0.0.1:8080/graphql", token)
+{:ok, out} = Cvisor.Remote.run(remote, "echo hello")
+# out => %{"stdout" => "hello\n", "stderr" => "", "exitCode" => 0}
+
+{:ok, sb} = Cvisor.Remote.create_sandbox(remote, "my-box")
+{:ok, true} = Cvisor.Remote.write_file(remote, sb["id"], "/app/x", "hi")  # base64 handled
+{:ok, "hi"} = Cvisor.Remote.read_file(remote, sb["id"], "/app/x")
+{:ok, _snap} = Cvisor.Remote.snapshot(remote, sb["id"])
+{:ok, true} = Cvisor.Remote.free_sandbox(remote, sb["id"])
+```
+
+`Cvisor.Remote` mirrors the daemon surface: `run`, `create_sandbox` /
+`list_sandboxes` / `free_sandbox` / `configure`, `write_file` / `read_file`,
+`cache_save` / `cache_restore` / `cache_list`, `snapshot` / `rollback` /
+`branch` / `fork` / `snapshots` / `delete_snapshot`, and `health`; each returns
+`{:ok, data} | {:error, reason}`. For raw documents use `Cvisor.GraphQL`:
+
+```elixir
+client = Cvisor.GraphQL.new("http://127.0.0.1:8080/graphql", token)
+{:ok, data} = Cvisor.GraphQL.query(client, "{ sandboxes { id name } }")
+{:ok, _} = Cvisor.GraphQL.mutate(client,
+             "mutation($c:String!){ run(command:$c){ stdout } }", %{"c" => "uname -a"})
+```
+
+The daemon prints its bearer token on startup (or set `CVISOR_TOKEN`). Requires
+OTP 27+ for the `:json` module.
+
 ## Development
 
 The SDK depends on the `cvisor` Erlang runtime. `mix.exs` defaults to the Hex

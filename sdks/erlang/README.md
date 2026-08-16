@@ -245,6 +245,44 @@ format must match the format used to save.
 > features. All copy/cache operations are **session-scoped**, for the same
 > reason file seeding is (the overlay is keyed by the sandbox's uid).
 
+## Remote daemon (GraphQL) — works on macOS
+
+The `cvisor` NIF above needs the native `libcvisor` (Linux only). To use cVisor
+from **any** platform, including macOS, talk to a running
+[`cvisord`](../../crates/cvisor-daemon) over its GraphQL API. `cvisor_graphql`
+and `cvisor_remote` are pure OTP (`httpc` + the OTP-27 `json` module) — no NIF —
+so they work without `libcvisor`:
+
+```erlang
+C = cvisor_remote:connect(<<"http://127.0.0.1:8080/graphql">>, Token),
+{ok, Out} = cvisor_remote:run(C, <<"echo hello">>),
+%% Out = #{<<"stdout">> => <<"hello\n">>, <<"stderr">> => <<>>, <<"exitCode">> => 0}
+
+{ok, Sb} = cvisor_remote:create_sandbox(C, <<"my-box">>),
+Id = maps:get(<<"id">>, Sb),
+{ok, true} = cvisor_remote:write_file(C, Id, <<"/app/x">>, <<"hi">>),  %% base64 handled
+{ok, <<"hi">>} = cvisor_remote:read_file(C, Id, <<"/app/x">>),
+{ok, _Snap} = cvisor_remote:snapshot(C, Id),
+{ok, true} = cvisor_remote:free_sandbox(C, Id).
+```
+
+`cvisor_remote` mirrors the daemon surface: `run`, `create_sandbox` /
+`list_sandboxes` / `free_sandbox` / `configure`, `write_file` / `read_file`,
+`cache_save` / `cache_restore` / `cache_list`, `snapshot` / `rollback` /
+`branch` / `fork` / `snapshots` / `delete_snapshot`, and `health`; each returns
+`{ok, Data} | {error, Reason}`. For raw documents use `cvisor_graphql`:
+
+```erlang
+{ok, Data} = cvisor_graphql:query(Url, Token, <<"{ sandboxes { id name } }">>, #{}),
+{ok, _} = cvisor_graphql:mutate(Url, Token,
+            <<"mutation($c:String!){ run(command:$c){ stdout } }">>,
+            #{<<"c">> => <<"uname -a">>}).
+```
+
+`inets`/`ssl` are started for you (`cvisor_graphql:ensure_started/0`). The daemon
+prints its bearer token on startup (or set `CVISOR_TOKEN`). Requires OTP 27+ for
+the `json` module.
+
 ## Requirements
 
 - Linux (aarch64 or x86_64) with the seccomp user notifier

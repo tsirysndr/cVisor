@@ -63,6 +63,48 @@ cvisor.new()
 Each builder returns an updated `Sandbox`, so they chain; the configuration is
 applied to the shared runtime when `run` executes.
 
+## Remote daemon (GraphQL) — works on macOS
+
+The `gleam_cvisor` runtime above needs the native `libcvisor` (Linux only). To
+use cVisor from **any** platform, including macOS, talk to a running
+[`cvisord`](../../crates/cvisor-daemon) over its GraphQL API. The `cvisor/remote`
+and `cvisor/graphql` modules are pure HTTP + JSON (`gleam_httpc` + `gleam_json`)
+— no NIF — so they work without `libcvisor`:
+
+```gleam
+import cvisor/remote
+import gleam/bit_array
+
+pub fn main() {
+  let client = remote.connect("http://127.0.0.1:8080/graphql", token)
+  let assert Ok(out) = remote.run(client, "echo hello", 0)
+  // out.stdout == "hello\n"
+
+  let assert Ok(sb) = remote.create_sandbox(client, "my-box")
+  let assert Ok(_) =
+    remote.write_file(client, sb.id, "/app/x", bit_array.from_string("hi"))
+  let assert Ok(_bytes) = remote.read_file(client, sb.id, "/app/x")  // base64 decoded
+  let assert Ok(_) = remote.free_sandbox(client, sb.id)
+}
+```
+
+`cvisor/remote` mirrors the daemon surface: `run`, `create_sandbox` /
+`list_sandboxes` / `free_sandbox` / `configure`, `write_file` / `read_file`,
+`cache_save` / `cache_restore` / `cache_list`, `snapshot` / `rollback` /
+`branch` / `fork` / `snapshots` / `delete_snapshot`, and `health`; each returns
+a `Result`. For raw documents use `cvisor/graphql`, whose `query`/`mutate` take
+a `gleam/json` value for the variables and return the `data` as a `Dynamic`:
+
+```gleam
+import cvisor/graphql
+import gleam/json
+
+let client = graphql.client("http://127.0.0.1:8080/graphql", token)
+let assert Ok(_data) = graphql.query(client, "{ sandboxes { id name } }", json.object([]))
+```
+
+The daemon prints its bearer token on startup (or set `CVISOR_TOKEN`).
+
 ## Development
 
 The SDK depends on the `cvisor` Erlang runtime. In the monorepo it is a path

@@ -135,6 +135,43 @@ docker run -it --rm --security-opt seccomp=unconfined \
          bash linux-install.sh >/dev/null && clojure -M:console'
 ```
 
+## Remote daemon (GraphQL) — works on macOS
+
+`cvisor.core` needs the native `libcvisor` (Linux only). To use cVisor from
+**any** platform, including macOS, talk to a running
+[`cvisord`](../../crates/cvisor-daemon) over its GraphQL API. This path is pure
+JDK (`java.net.http` + `clojure.data.json`) — no native library — and requiring
+these namespaces never loads the `.so`:
+
+```clojure
+(require '[cvisor.remote :as remote])
+
+(let [c (remote/client "http://127.0.0.1:8080/graphql" token)]
+  (get (remote/run c "echo hello") "stdout")   ; => "hello\n"
+
+  (let [sb (remote/create-sandbox c "my-box")]
+    (remote/write-file c (get sb "id") "/app/x" "hi")  ; base64 handled for you
+    (String. (remote/read-file c (get sb "id") "/app/x"))  ; => "hi"
+    (remote/snapshot c (get sb "id"))
+    (remote/fork c (get sb "id") "clone")
+    (remote/free-sandbox c (get sb "id"))))
+```
+
+`cvisor.remote` mirrors the daemon surface: `run`, `create-sandbox` /
+`list-sandboxes` / `free-sandbox` / `configure`, `write-file` / `read-file`,
+`cache-save` / `cache-restore` / `cache-list`, `snapshot` / `rollback` /
+`branch` / `fork` / `snapshots` / `delete-snapshot`, and `health`. For raw
+documents, drop to `cvisor.graphql`:
+
+```clojure
+(require '[cvisor.graphql :as graphql])
+(let [c (graphql/client "http://127.0.0.1:8080/graphql" token)]
+  (graphql/query c "{ sandboxes { id name } }" {})
+  (graphql/mutate c "mutation($c:String!){ run(command:$c){ stdout } }" {"c" "uname -a"}))
+```
+
+The daemon prints its bearer `token` on startup (or set `CVISOR_TOKEN`).
+
 ## Development
 
 The SDK loads `libcvisor.so`. Build it from the repo root (`cargo xtask ffi`),

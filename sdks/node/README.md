@@ -103,6 +103,43 @@ await sb.sh`echo hi > /tmp/test.txt`.stdout(); // only visible in this sandbox
 await sb.sh`chroot /tmp`.stderr();             // blocked
 ```
 
+## Remote daemon (GraphQL) — works on macOS
+
+The `Sandbox` above needs the native `libcvisor` (Linux only). To use cVisor
+from **any** platform, including macOS, talk to a running
+[`cvisord`](../../crates/cvisor-daemon) over its GraphQL API. This path is pure
+`fetch` + `JSON` — no native library — and importing it never loads the `.so`:
+
+```ts
+import { RemoteSandbox, GraphQLClient } from "cvisor";
+
+const remote = new RemoteSandbox("http://127.0.0.1:8080/graphql", token);
+const out = await remote.run("echo hello");   // { stdout: "hello\n", stderr: "", exitCode: 0 }
+
+const sb = await remote.createSandbox("my-box");
+await remote.writeFile(sb.id, "/app/x", "hi");        // base64 handled for you
+new TextDecoder().decode(await remote.readFile(sb.id, "/app/x"));  // "hi"
+const snap = await remote.snapshot(sb.id);
+await remote.fork(sb.id, "clone");
+await remote.freeSandbox(sb.id);
+```
+
+`RemoteSandbox` mirrors the daemon surface: `run`, `createSandbox` /
+`listSandboxes` / `freeSandbox` / `configure`, `writeFile` / `readFile` /
+`copyInto` / `copyOut`, `cacheSave` / `cacheRestore` / `cacheList`, `snapshot` /
+`rollback` / `branch` / `fork` / `snapshots` / `deleteSnapshot`, and `health`.
+For raw documents, drop to the client:
+
+```ts
+const gql = new GraphQLClient("http://127.0.0.1:8080/graphql", token);
+const { sandboxes } = await gql.query(`{ sandboxes { id name } }`);
+await gql.mutate(`mutation($c:String!){ run(command:$c){ stdout } }`, { c: "uname -a" });
+```
+
+The daemon prints its bearer `token` on startup (or set `CVISOR_TOKEN`). On a
+non-Linux host, constructing the FFI `Sandbox` throws a clear "Linux-only" error
+pointing you here.
+
 ## Development
 
 The native runtime is the Rust workspace at the repo root (crate

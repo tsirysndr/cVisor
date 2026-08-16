@@ -191,6 +191,45 @@ with Sandbox() as sb:
 - `kill()` — SIGKILL the session.
 - `close()` — free the session (idempotent; also a context manager and on `__del__`).
 
+## Remote daemon (GraphQL) — works on macOS
+
+The `Sandbox` above needs the native `libcvisor` (Linux only). To use cVisor
+from **any** platform, including macOS, talk to a running
+[`cvisord`](../../crates/cvisor-daemon) over its GraphQL API. This path is pure
+stdlib (`urllib.request` + `json`) — no native library — and importing it never
+loads the `.so`:
+
+```python
+from cvisor import RemoteSandbox, GraphQLClient
+
+remote = RemoteSandbox("http://127.0.0.1:8080/graphql", token)
+out = remote.run("echo hello")
+print(out["stdout"])                       # "hello\n"
+
+sb = remote.create_sandbox("my-box")
+remote.write_file(sb["id"], "/app/x", "hi")   # base64 handled for you
+print(remote.read_file(sb["id"], "/app/x"))   # b"hi"
+snap = remote.snapshot(sb["id"])
+remote.fork(sb["id"], "clone")
+remote.free_sandbox(sb["id"])
+```
+
+`RemoteSandbox` mirrors the daemon surface: `run`, `create_sandbox` /
+`list_sandboxes` / `free_sandbox` / `configure`, `write_file` / `read_file`,
+`cache_save` / `cache_restore` / `cache_list`, `snapshot` / `rollback` /
+`branch` / `fork` / `snapshots` / `delete_snapshot`, and `health`. For raw
+documents, drop to the client:
+
+```python
+gql = GraphQLClient("http://127.0.0.1:8080/graphql", token)
+data = gql.query("{ sandboxes { id name } }")
+gql.mutate("mutation($c:String!){ run(command:$c){ stdout } }", {"c": "uname -a"})
+```
+
+The daemon prints its bearer `token` on startup (or set `CVISOR_TOKEN`). On a
+non-Linux host, constructing the FFI `Sandbox` raises a clear "Linux-only"
+`RuntimeError` pointing you here.
+
 ## Interactive console
 
 Launch an IPython REPL with a live sandbox preloaded:
