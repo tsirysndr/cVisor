@@ -16,7 +16,7 @@ import { PrimaryButton, TextButton } from "./Buttons";
 
 const schema = z.object({
   graphqlUrl: z.string().url("Enter a valid URL"),
-  wsUrl: z.string().min(1, "Required"),
+  wsUrl: z.string(),
   token: z.string(),
 });
 
@@ -52,12 +52,13 @@ export function ConfigForm({
   });
 
   // Auto-derive wsUrl from graphqlUrl until the user edits wsUrl by hand.
+  // Not on desktop: the URL there is a gRPC address with no ws endpoint.
   const graphqlUrl = watch("graphqlUrl");
   useEffect(() => {
-    if (!wsEdited.current && graphqlUrl) {
+    if (!desktop && !wsEdited.current && graphqlUrl) {
       setValue("wsUrl", deriveWsUrl(graphqlUrl));
     }
-  }, [graphqlUrl, setValue]);
+  }, [graphqlUrl, setValue, desktop]);
 
   const onSubmit = handleSubmit(async (values) => {
     setConnError(null);
@@ -79,7 +80,7 @@ export function ConfigForm({
         variant="bordered"
         radius="none"
         placeholder={
-          desktop ? "http://127.0.0.1:50051" : "http://localhost:8080/graphql"
+          desktop ? "http://localhost:50051" : "http://localhost:8080/graphql"
         }
         isInvalid={!!errors.graphqlUrl}
         errorMessage={errors.graphqlUrl?.message}
@@ -108,10 +109,8 @@ export function ConfigForm({
 
       {connError && <p className="text-sm text-danger">{connError}</p>}
 
-      <div className="flex items-center gap-2">
-        <PrimaryButton type="submit" isLoading={isSubmitting} className="flex-1">
-          {submitLabel}
-        </PrimaryButton>
+      {/* Paired action rows split evenly so both buttons match in width. */}
+      <div className={onDisconnect ? "grid grid-cols-2 gap-2" : "flex"}>
         {onDisconnect && (
           <TextButton
             type="button"
@@ -121,6 +120,9 @@ export function ConfigForm({
             Disconnect
           </TextButton>
         )}
+        <PrimaryButton type="submit" isLoading={isSubmitting} className="flex-1">
+          {submitLabel}
+        </PrimaryButton>
       </div>
     </form>
   );

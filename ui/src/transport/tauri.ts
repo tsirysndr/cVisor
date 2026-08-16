@@ -120,14 +120,21 @@ export function tauriTransport(): Transport {
       invoke<number>("cache_clear", { backend: backend ?? null }),
 
     async openTerminal(sandboxId, onOutput, onExit): Promise<TerminalSession> {
-      const sessionId = await invoke<string>("shell_open", { sandboxId });
+      // Attach the listeners before shell_open: the daemon starts streaming as
+      // soon as the command runs, and events emitted while the invoke promise
+      // resolves (typically the shell prompt) would otherwise be lost. Until
+      // the session id is known, events are buffered and replayed after.
+      let sessionId: string | null = null;
+      const pendingOutput: { sessionId: string; base64: string }[] = [];
+      const pendingExit: { sessionId: string; code: number }[] = [];
 
       const unlisten: UnlistenFn[] = [];
       unlisten.push(
         await listen<{ sessionId: string; base64: string }>(
           "shell-output",
           (e) => {
-            if (e.payload.sessionId === sessionId)
+            if (sessionId === null) pendingOutput.push(e.payload);
+            else if (e.payload.sessionId === sessionId)
               onOutput(b64ToBytes(e.payload.base64));
           },
         ),
@@ -136,10 +143,24 @@ export function tauriTransport(): Transport {
         await listen<{ sessionId: string; code: number }>(
           "shell-exit",
           (e) => {
-            if (e.payload.sessionId === sessionId) onExit?.(e.payload.code);
+            if (sessionId === null) pendingExit.push(e.payload);
+            else if (e.payload.sessionId === sessionId) onExit?.(e.payload.code);
           },
         ),
       );
+
+      try {
+        sessionId = await invoke<string>("shell_open", { sandboxId });
+      } catch (e) {
+        unlisten.forEach((fn) => fn());
+        throw e;
+      }
+      for (const p of pendingOutput)
+        if (p.sessionId === sessionId) onOutput(b64ToBytes(p.base64));
+      for (const p of pendingExit)
+        if (p.sessionId === sessionId) onExit?.(p.code);
+      pendingOutput.length = 0;
+      pendingExit.length = 0;
 
       return {
         write: (data) => {

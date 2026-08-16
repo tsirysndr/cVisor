@@ -1,15 +1,15 @@
-import { useEffect, useRef } from "react";
-import { Button, Tooltip } from "@heroui/react";
+import { useEffect, useRef, useState } from "react";
+import { Button, Input, Tooltip } from "@heroui/react";
 import { useAtom, useSetAtom } from "jotai";
 import {
   IconCamera,
+  IconFilter,
   IconGitFork,
   IconPlus,
   IconTerminal2,
   IconTrash,
 } from "@tabler/icons-react";
 import {
-  createModalOpenAtom,
   cursorAtom,
   runModalOpenAtom,
   selectedSandboxAtom,
@@ -21,7 +21,6 @@ import {
   useInfiniteSandboxes,
   useInfiniteScroll,
 } from "../../hooks/useInfinitePaged";
-import { PrimaryButton } from "../Buttons";
 import { LoadingMoreRow, SandboxListSkeleton } from "../Skeletons";
 import { ViewShell } from "./ViewShell";
 
@@ -37,7 +36,7 @@ export function SandboxesView() {
   const [selected, setSelected] = useAtom(selectedSandboxAtom);
   const setPanel = useSetAtom(terminalPanelVisibleAtom);
   const setRunOpen = useSetAtom(runModalOpenAtom);
-  const setCreateOpen = useSetAtom(createModalOpenAtom);
+  const [filter, setFilter] = useState("");
   const free = useFreeSandbox();
   const fork = useFork();
   const snapshot = useSnapshot();
@@ -53,37 +52,58 @@ export function SandboxesView() {
     fetchNextPage,
   });
 
-  const open = (id: string, i: number) => {
-    setCursor(i);
+  // Map back to the unfiltered index so the keyboard cursor stays consistent.
+  const cursorTo = (id: string) => {
+    const idx = sandboxes.findIndex((s) => s.id === id);
+    if (idx >= 0) setCursor(idx);
+  };
+
+  const open = (id: string) => {
+    cursorTo(id);
     setSelected(id);
     setPanel(true);
   };
+
+  const q = filter.trim().toLowerCase();
+  const visible = q
+    ? sandboxes.filter(
+        (sb) =>
+          sb.name.toLowerCase().includes(q) || sb.id.toLowerCase().includes(q),
+      )
+    : sandboxes;
 
   return (
     <ViewShell
       title="Sandboxes"
       action={
-        <PrimaryButton
+        <Input
           size="sm"
-          startContent={<IconPlus size={16} />}
-          onPress={() => setCreateOpen(true)}
-        >
-          New sandbox
-        </PrimaryButton>
+          variant="bordered"
+          radius="none"
+          className="w-56"
+          aria-label="Filter sandboxes"
+          placeholder="Filter sandboxes…"
+          startContent={<IconFilter size={14} className="text-default-400" />}
+          isClearable
+          value={filter}
+          onValueChange={setFilter}
+        />
       }
     >
       {isLoading ? (
         <SandboxListSkeleton />
-      ) : sandboxes.length > 0 ? (
+      ) : visible.length > 0 ? (
         <>
           <ul className="flex flex-col gap-1">
-            {sandboxes.map((sb, i) => {
-              const active = i === cursor || sb.id === selected;
+            {visible.map((sb, i) => {
+              // The keyboard cursor indexes the unfiltered list, so only use it
+              // for highlighting when no filter is applied.
+              const active = (!q && i === cursor) || sb.id === selected;
               return (
                 <li
                   key={sb.id}
-                  ref={i === cursor ? activeRef : undefined}
-                  onClick={() => open(sb.id, i)}
+                  ref={!q && i === cursor ? activeRef : undefined}
+                  onClick={() => open(sb.id)}
                   className={`group flex cursor-pointer items-center gap-3 border px-3 py-2.5 text-sm transition ${
                     active
                       ? "border-primary/60 bg-primary/10 shadow-[0_0_10px_rgba(255,42,109,0.25)]"
@@ -122,7 +142,7 @@ export function SandboxesView() {
                         variant="light"
                         radius="none"
                         aria-label="Open terminal"
-                        onPress={() => open(sb.id, i)}
+                        onPress={() => open(sb.id)}
                       >
                         <IconTerminal2 size={16} className="text-secondary" />
                       </Button>
@@ -136,7 +156,7 @@ export function SandboxesView() {
                         aria-label="Run command"
                         onPress={() => {
                           setSelected(sb.id);
-                          setCursor(i);
+                          cursorTo(sb.id);
                           setRunOpen(true);
                         }}
                       >
@@ -192,7 +212,11 @@ export function SandboxesView() {
       ) : (
         <div className="flex flex-col items-center justify-center gap-3 py-16 text-default-500">
           <IconTerminal2 size={40} className="text-primary" stroke={1.5} />
-          <p className="text-sm">No sandboxes yet. Create one to get started.</p>
+          <p className="text-sm">
+            {q
+              ? `No sandboxes match “${filter.trim()}”.`
+              : "No sandboxes yet. Create one to get started."}
+          </p>
         </div>
       )}
     </ViewShell>

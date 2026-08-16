@@ -21,12 +21,14 @@ use cvisor_proto::cvisor::{
     SnapshotRequest, WriteFileRequest,
 };
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 use tonic::{Request, Status};
+
+mod tray;
 
 /// The daemon gRPC address + bearer token, set from the frontend via `set_config`.
 #[derive(Clone, Default)]
@@ -136,6 +138,12 @@ struct ShellOutputPayload {
 struct ShellExitPayload {
     session_id: String,
     code: i32,
+}
+
+/// Update the menu-bar tray status line (called by the frontend on probe).
+#[tauri::command]
+fn set_tray_status(app: AppHandle, ok: bool, detail: String) {
+    tray::set_status(&app, ok, &detail);
 }
 
 #[tauri::command]
@@ -596,7 +604,25 @@ async fn shell_close(state: State<'_, AppState>, session_id: String) -> Result<(
 fn main() {
     tauri::Builder::default()
         .manage(AppState::default())
+        .manage(tray::TrayStatus::default())
+        .setup(|app| {
+            // macOS-style system tray (Docker-Desktop-like).
+            tray::install(app.handle())?;
+            // Close the window to the tray instead of quitting (the app stays
+            // alive in the menu bar; use the tray menu/Cmd-Q to actually quit).
+            if let Some(win) = app.get_webview_window("main") {
+                let w = win.clone();
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = w.hide();
+                    }
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            set_tray_status,
             set_config,
             health,
             list_sandboxes,

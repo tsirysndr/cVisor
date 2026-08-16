@@ -23,12 +23,26 @@ export function deriveWsUrl(graphqlUrl: string): string {
     : ws.replace(/\/?$/, "/graphql/ws");
 }
 
-export const CONFIG_DEFAULTS: CvisorConfig = {
-  graphqlUrl:
-    import.meta.env.VITE_CVISOR_GRAPHQL_URL || "http://localhost:8080/graphql",
-  wsUrl: import.meta.env.VITE_CVISOR_WS_URL || "ws://localhost:8080/graphql/ws",
-  token: import.meta.env.VITE_CVISOR_TOKEN || "",
-};
+// The desktop build talks gRPC directly to the daemon (default port 50051);
+// the browser build talks GraphQL over HTTP/WS.
+const desktop =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+export const CONFIG_DEFAULTS: CvisorConfig = desktop
+  ? {
+      graphqlUrl:
+        import.meta.env.VITE_CVISOR_GRPC_URL || "http://localhost:50051",
+      wsUrl: "",
+      token: import.meta.env.VITE_CVISOR_TOKEN || "",
+    }
+  : {
+      graphqlUrl:
+        import.meta.env.VITE_CVISOR_GRAPHQL_URL ||
+        "http://localhost:8080/graphql",
+      wsUrl:
+        import.meta.env.VITE_CVISOR_WS_URL || "ws://localhost:8080/graphql/ws",
+      token: import.meta.env.VITE_CVISOR_TOKEN || "",
+    };
 
 declare global {
   interface Window {

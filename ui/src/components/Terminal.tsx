@@ -19,10 +19,10 @@ export function Terminal({ sandboxId }: { sandboxId: string }) {
       fontFamily: "'Agave Nerd Font', 'Agave', ui-monospace, monospace",
       cursorBlink: true,
       theme: {
-        background: "#0D0221",
+        background: "#1E1C3F",
         foreground: "#F5F5FF",
         cursor: "#FF2A6D",
-        cursorAccent: "#0D0221",
+        cursorAccent: "#1E1C3F",
         selectionBackground: "#B026FF66",
       },
     });
@@ -49,17 +49,33 @@ export function Terminal({ sandboxId }: { sandboxId: string }) {
 
     let raf = requestAnimationFrame(doFit);
 
-    // Keystrokes -> session stdin (buffered until the session is ready).
-    term.onData((data) => session?.write(new TextEncoder().encode(data)));
+    // Keystrokes -> session stdin, buffered until the session is ready so
+    // nothing typed during connection setup is dropped.
+    const pendingInput: Uint8Array[] = [];
+    term.onData((data) => {
+      const bytes = new TextEncoder().encode(data);
+      if (session) session.write(bytes);
+      else pendingInput.push(bytes);
+    });
 
     getTransport()
-      .openTerminal(sandboxId, (bytes) => term.write(bytes))
+      .openTerminal(
+        sandboxId,
+        (bytes) => term.write(bytes),
+        (code) => {
+          term.write(
+            `\r\n\x1b[90m[session exited with code ${code}]\x1b[0m\r\n`,
+          );
+        },
+      )
       .then((s) => {
         if (disposed) {
           s.close();
           return;
         }
         session = s;
+        for (const bytes of pendingInput) s.write(bytes);
+        pendingInput.length = 0;
         raf = requestAnimationFrame(doFit);
       })
       .catch((e) => {

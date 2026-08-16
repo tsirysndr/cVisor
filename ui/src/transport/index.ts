@@ -19,6 +19,12 @@ export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+// macOS gets native window buttons (overlay title bar); other platforms render
+// the custom TitleBar with its own controls.
+export function isMac(): boolean {
+  return typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
+}
+
 let impl: Transport | null = null;
 
 // The active transport, chosen once at runtime: gRPC-over-Tauri on the desktop,

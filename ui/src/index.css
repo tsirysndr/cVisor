@@ -25,11 +25,32 @@ body {
   font-family: "Roboto Mono Variable", ui-monospace, monospace;
 }
 
-/* cmdk palette highlights the active item with the neon-magenta accent. */
+/*
+ * No focus rings on form controls: neither the WebKit native blue glow nor
+ * HeroUI's focus-visible outline. Focused fields already read via their
+ * border color change.
+ */
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible,
+[data-focus-visible="true"] {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* cmdk palette highlights the active item with the neon-magenta accent.
+   Text color follows the theme so it stays readable on the tinted row. */
 [cmdk-item][data-selected="true"] {
   background: rgba(255, 42, 109, 0.16);
-  color: #f5f5ff;
+  color: #000000;
   box-shadow: inset 2px 0 0 #ff2a6d;
+}
+
+.dark [cmdk-item][data-selected="true"] {
+  color: #f5f5ff;
 }
 
 [cmdk-item] {

@@ -11,6 +11,7 @@ import {
   sidebarVisibleAtom,
   snapshotPickerAtom,
   terminalPanelVisibleAtom,
+  themeAtom,
   viewAtom,
 } from "../state/atoms";
 import { useBranch } from "./useSandboxes";
@@ -48,6 +49,7 @@ export function useShortcuts() {
   const setPicker = useSetAtom(snapshotPickerAtom);
   const setSidebar = useSetAtom(sidebarVisibleAtom);
   const setPanel = useSetAtom(terminalPanelVisibleAtom);
+  const setTheme = useSetAtom(themeAtom);
   const selected = useAtomValue(selectedSandboxAtom);
 
   const help = useAtomValue(helpOpenAtom);
@@ -176,6 +178,9 @@ export function useShortcuts() {
         case "c":
           setCreate(true);
           break;
+        case "d":
+          setTheme((t) => (t === "dark" ? "light" : "dark"));
+          break;
         default:
           break;
       }
@@ -200,6 +205,7 @@ export function useShortcuts() {
     setSelected,
     setSidebar,
     setCursor,
+    setTheme,
     setView,
     snapshot,
     view,

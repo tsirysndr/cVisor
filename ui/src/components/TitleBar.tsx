@@ -2,16 +2,16 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IconMinus, IconSquare, IconX } from "@tabler/icons-react";
 import { Logo } from "./Logo";
 
-// Custom desktop titlebar (decorations are disabled in tauri.conf.json). The
-// bar itself drags the window; the right-hand controls drive it. Rendered only
-// in the Tauri build.
+// Custom desktop titlebar for Linux, where decorations are disabled
+// (tauri.linux.conf.json). The bar itself drags the window; the right-hand
+// controls drive it. macOS uses the native overlay traffic lights instead.
 export function TitleBar() {
   const win = getCurrentWindow();
 
   return (
     <div
       data-tauri-drag-region
-      className="flex h-8 shrink-0 select-none items-center justify-between border-b border-content3 bg-[#0B0B12] px-3"
+      className="flex h-8 shrink-0 select-none items-center justify-between border-b border-content3 bg-[#171530] px-3"
     >
       <div
         data-tauri-drag-region

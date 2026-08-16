@@ -59,8 +59,8 @@ export function TerminalPanel() {
       style={fullscreen ? undefined : { height }}
       className={
         fullscreen
-          ? "absolute inset-0 z-30 flex flex-col bg-[#0B0B12]"
-          : "relative flex shrink-0 flex-col border-t border-content3 bg-[#0B0B12]"
+          ? "absolute inset-0 z-30 flex flex-col bg-[#171530]"
+          : "relative flex shrink-0 flex-col border-t border-content3 bg-[#171530]"
       }
     >
       {!fullscreen && (

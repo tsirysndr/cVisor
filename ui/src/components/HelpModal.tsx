@@ -27,6 +27,7 @@ const GROUPS: { heading: string; items: { keys: string[]; label: string }[] }[] 
       items: [
         { keys: [MOD, "B"], label: "Show / hide sidebar" },
         { keys: [MOD, "J"], label: "Show / hide terminal panel" },
+        { keys: ["d"], label: "Toggle dark / light theme" },
       ],
     },
     {

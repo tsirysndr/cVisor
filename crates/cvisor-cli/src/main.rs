@@ -603,18 +603,6 @@ OPTIONS:
         }
     }
 
-    /// The interactive shell to launch: `bash` if present in the sandbox,
-    /// otherwise `/bin/sh`. cow paths read through to the host, so a host
-    /// `bash` is what the guest would exec.
-    fn interactive_shell() -> String {
-        for candidate in ["/bin/bash", "/usr/bin/bash"] {
-            if std::path::Path::new(candidate).exists() {
-                return candidate.to_string();
-            }
-        }
-        "/bin/sh".to_string()
-    }
-
     /// `cvisor` (no command): an interactive shell on a PTY (bash if available,
     /// else /bin/sh). Falls back to a plain sandboxed shell if stdin is not a
     /// terminal.

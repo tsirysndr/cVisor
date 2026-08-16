@@ -12,6 +12,7 @@ import {
   IconSun,
 } from "@tabler/icons-react";
 import { useHealth } from "../hooks/useHealth";
+import { isMac, isTauri } from "../transport";
 import {
   createModalOpenAtom,
   paletteOpenAtom,
@@ -41,13 +42,17 @@ export function TopBar() {
       ? "shadow-[0_0_8px_#FF3864]"
       : "shadow-[0_0_8px_#FFD319]";
 
-  return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-content3 bg-content1 px-3">
-      <div className="flex items-center gap-2 font-semibold">
-        <Logo size={22} />
-        <span className="hidden sm:inline">cVisor</span>
-      </div>
+  // On macOS the native traffic lights overlay the top-left corner, so the bar
+  // doubles as the window drag region and leaves room for them.
+  const macDesktop = isTauri() && isMac();
 
+  return (
+    <header
+      data-tauri-drag-region
+      className={`flex h-12 shrink-0 items-center gap-3 border-b border-content3 bg-content1 pr-3 ${
+        macDesktop ? "pl-20" : "pl-3"
+      }`}
+    >
       <div className="flex items-center gap-0.5">
         <Tooltip content={sidebar ? "Hide sidebar (⌘B)" : "Show sidebar (⌘B)"}>
           <Button
@@ -85,20 +90,33 @@ export function TopBar() {
         </Tooltip>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-default-500">
+      <div
+        data-tauri-drag-region
+        className="flex items-center gap-2 font-semibold"
+      >
+        <Logo size={22} />
+        <span className="pointer-events-none hidden sm:inline">cVisor</span>
+      </div>
+
+      <div
+        data-tauri-drag-region
+        className="flex items-center gap-2 text-xs text-default-500"
+      >
         {isLoading ? (
           <InlineSkeleton width={110} height={10} />
         ) : (
           <>
             <span className={`h-2 w-2 rounded-full ${dot} ${glow}`} />
-            <span>
+            <span className="pointer-events-none">
               {connected ? `connected · v${health?.version}` : "disconnected"}
             </span>
           </>
         )}
       </div>
 
-      <div className="ml-auto flex items-center gap-1">
+      <div data-tauri-drag-region className="flex-1" />
+
+      <div className="flex items-center gap-1">
         <Button
           size="sm"
           variant="flat"
@@ -106,7 +124,7 @@ export function TopBar() {
           startContent={<IconSearch size={16} />}
           onPress={() => setPaletteOpen(true)}
         >
-          <span className="hidden sm:inline">Commands</span>
+          <span className="hidden sm:inline">Search</span>
           <kbd className="ml-1 rounded bg-content3 px-1 text-[10px]">/</kbd>
         </Button>
         <Tooltip content="Toggle theme">

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useAtomValue } from "jotai";
 import { useQueryClient } from "@tanstack/react-query";
 import { configAtom, setActiveConfig } from "./config";
-import { getTransport, isTauri } from "./transport";
+import { getTransport, isMac, isTauri } from "./transport";
 import {
   sidebarVisibleAtom,
   themeAtom,
@@ -10,6 +10,7 @@ import {
 } from "./state/atoms";
 import { applyTheme } from "./theme";
 import { useShortcuts } from "./hooks/useShortcuts";
+import { useTrayActions, useTrayStatus } from "./hooks/useTray";
 import { TitleBar } from "./components/TitleBar";
 import { TopBar } from "./components/TopBar";
 import { Sidebar } from "./components/Sidebar";
@@ -28,6 +29,7 @@ import { SetupScreen } from "./components/SetupScreen";
 export default function App() {
   const theme = useAtomValue(themeAtom);
   const config = useAtomValue(configAtom);
+  useTrayActions();
 
   // Keep the module-level mirror the web graphql clients read in sync
   // (synchronous so children that fire queries on mount see the right config).
@@ -50,7 +52,7 @@ export default function App() {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
-      {isTauri() && <TitleBar />}
+      {isTauri() && !isMac() && <TitleBar />}
       {config ? (
         <Workspace />
       ) : (
@@ -65,6 +67,7 @@ export default function App() {
 
 function Workspace() {
   useShortcuts();
+  useTrayStatus();
   const sidebarVisible = useAtomValue(sidebarVisibleAtom);
 
   return (

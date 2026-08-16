@@ -27,8 +27,9 @@ import {
   snapshotPickerAtom,
   terminalPanelVisibleAtom,
   themeAtom,
+  viewAtom,
 } from "../state/atoms";
-import { useFreeSandbox } from "../hooks/useSandboxes";
+import { useFreeSandbox, useSandboxes } from "../hooks/useSandboxes";
 import { useSnapshot } from "../hooks/useSnapshots";
 
 // Raycast-style palette (opened by "/" or Cmd/Ctrl-K). cmdk handles fuzzy
@@ -44,9 +45,11 @@ export function CommandPalette() {
   const setSidebar = useSetAtom(sidebarVisibleAtom);
   const setPanel = useSetAtom(terminalPanelVisibleAtom);
   const setPicker = useSetAtom(snapshotPickerAtom);
+  const setView = useSetAtom(viewAtom);
   const free = useFreeSandbox();
   const snapshot = useSnapshot();
   const qc = useQueryClient();
+  const { data: sandboxes } = useSandboxes();
 
   useEffect(() => {
     if (!open) return;
@@ -83,6 +86,37 @@ export function CommandPalette() {
           <Command.Empty className="px-3 py-6 text-center text-sm text-default-400">
             No results.
           </Command.Empty>
+
+          {sandboxes && sandboxes.length > 0 && (
+            <Command.Group
+              heading="Sandboxes"
+              className="px-1 text-[11px] uppercase tracking-wide text-default-400"
+            >
+              {sandboxes.map((sb) => (
+                <Command.Item
+                  key={sb.id}
+                  // Match on name and id so a partial id also finds it.
+                  value={`${sb.name} ${sb.id}`}
+                  onSelect={() =>
+                    run(() => {
+                      setView("sandboxes");
+                      setSelected(sb.id);
+                      setPanel(true);
+                    })
+                  }
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-default-600"
+                >
+                  <span className="text-secondary">
+                    <IconTerminal2 size={16} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{sb.name}</span>
+                  <span className="truncate text-[11px] text-default-400">
+                    {sb.id}
+                  </span>
+                </Command.Item>
+              ))}
+            </Command.Group>
+          )}
 
           <Command.Group
             heading="Sandbox"

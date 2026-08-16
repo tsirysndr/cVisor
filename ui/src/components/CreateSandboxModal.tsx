@@ -68,7 +68,7 @@ export function CreateSandboxModal() {
               errorMessage={errors.name?.message}
             />
           </ModalBody>
-          <ModalFooter>
+          <ModalFooter className="grid grid-cols-2 gap-2">
             <TextButton onPress={() => setOpen(false)}>Cancel</TextButton>
             <PrimaryButton type="submit" isLoading={create.isPending}>
               Create

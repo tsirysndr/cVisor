@@ -1,11 +1,21 @@
 import ContentLoader from "react-content-loader";
+import { useAtomValue } from "jotai";
+import { themeAtom } from "../state/atoms";
 
-// Animated placeholders tuned to the synthwave dark surfaces. Preferred over
-// spinners for list/content loading states.
-const BASE = "#190D2E";
-const HIGHLIGHT = "#2C1B45";
+// Animated placeholders (preferred over spinners for list/content loading
+// states) with shimmer colors matched to the active theme's surfaces.
+const COLORS = {
+  dark: { base: "#27264D", highlight: "#32305A" },
+  light: { base: "#ECECF1", highlight: "#F6F6F9" },
+};
+
+function useSkeletonColors() {
+  const theme = useAtomValue(themeAtom);
+  return COLORS[theme === "light" ? "light" : "dark"];
+}
 
 export function SandboxListSkeleton({ rows = 5 }: { rows?: number }) {
+  const { base, highlight } = useSkeletonColors();
   return (
     <div className="flex flex-col gap-1 px-2">
       {Array.from({ length: rows }).map((_, i) => (
@@ -14,8 +24,8 @@ export function SandboxListSkeleton({ rows = 5 }: { rows?: number }) {
           speed={2}
           width="100%"
           height={40}
-          backgroundColor={BASE}
-          foregroundColor={HIGHLIGHT}
+          backgroundColor={base}
+          foregroundColor={highlight}
           className="w-full"
         >
           <circle cx="10" cy="20" r="4" />
@@ -34,13 +44,14 @@ export function InlineSkeleton({
   width?: number;
   height?: number;
 }) {
+  const { base, highlight } = useSkeletonColors();
   return (
     <ContentLoader
       speed={2}
       width={width}
       height={height}
-      backgroundColor={BASE}
-      foregroundColor={HIGHLIGHT}
+      backgroundColor={base}
+      foregroundColor={highlight}
     >
       <rect x="0" y="0" rx="4" ry="4" width={width} height={height} />
     </ContentLoader>
@@ -57,13 +68,14 @@ export function LoadingMoreRow() {
 }
 
 export function OutputSkeleton() {
+  const { base, highlight } = useSkeletonColors();
   return (
     <ContentLoader
       speed={2}
       width="100%"
       height={120}
-      backgroundColor={BASE}
-      foregroundColor={HIGHLIGHT}
+      backgroundColor={base}
+      foregroundColor={highlight}
       className="w-full"
     >
       <rect x="0" y="0" rx="4" ry="4" width="90%" height="10" />

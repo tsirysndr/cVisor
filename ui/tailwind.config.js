@@ -25,31 +25,32 @@ export default {
       },
     },
   },
-  // Synthwave / 80s-neon dark theme: deep near-black violet surfaces, flat
-  // neon accents (no gradients), glow via solid box/text-shadow only.
+  // Dark theme surfaces follow the "Night Rider" VS Code palette (deep indigo:
+  // editor #1E1C3F, sidebar #1A1837, status bar #171530, tabs #222246), with
+  // flat neon accents (no gradients) and glow via solid box/text-shadow only.
   plugins: [
     heroui({
       defaultTheme: "dark",
       themes: {
         dark: {
           colors: {
-            background: "#0D0221",
+            background: "#1E1C3F",
             foreground: "#F5F5FF",
             focus: "#FF2A6D",
-            content1: "#190D2E",
-            content2: "#211436",
-            content3: "#2C1B45",
-            content4: "#3A2558",
-            divider: "#2C1B45",
+            content1: "#1A1837",
+            content2: "#27264D",
+            content3: "#32305A",
+            content4: "#403D6E",
+            divider: "#32305A",
             default: {
-              100: "#211436",
-              200: "#2C1B45",
-              300: "#3A2558",
-              400: "#5A4A78",
-              500: "#8A7FA6",
-              600: "#B5ADCC",
+              100: "#222246",
+              200: "#2C2A52",
+              300: "#3A3766",
+              400: "#5B5890",
+              500: "#8B87B3",
+              600: "#B6B3D1",
               foreground: "#F5F5FF",
-              DEFAULT: "#2C1B45",
+              DEFAULT: "#2C2A52",
             },
             primary: {
               100: "#3D0A20",
