@@ -116,16 +116,15 @@ fn ensure_daemon() -> Result<(String, String), i32> {
         Some(info) if info.running => {
             let token = require_token()?;
             ok(&format!("reusing sandbox microVM '{VM_NAME}'"));
-            wait_ready(&token)?;
+            ensure_daemon_running(&Sandbox::from_id(info.id.as_str()), &token)?;
             Ok((addr, token))
         }
         Some(info) => {
             let token = require_token()?;
             step(&format!("starting stopped microVM '{VM_NAME}'…"));
-            Sandbox::from_id(info.id.as_str())
-                .start()
-                .map_err(bsd_err)?;
-            wait_ready(&token)?;
+            let sb = Sandbox::from_id(info.id.as_str());
+            sb.start().map_err(bsd_err)?;
+            ensure_daemon_running(&sb, &token)?;
             ok("microVM started");
             Ok((addr, token))
         }
@@ -188,6 +187,65 @@ fn create_vm(addr: &str) -> Result<(String, String), i32> {
 
     ok(&format!("sandbox '{VM_NAME}' ready"));
     Ok((addr.to_string(), token))
+}
+
+/// Make sure `cvisord` is serving inside a running microVM, then wait for it.
+///
+/// `bsdkrun start` re-boots a stopped machine from its own rootfs but does not
+/// replay the `--entrypoint`/`-e` recorded at create time: the guest comes back
+/// on the image's default command with no `CVISOR_*` env, so cvisord never runs
+/// and the forwarded ports lead nowhere. Launch it through the guest agent when
+/// the daemon isn't answering — this also recovers a VM restarted by hand or by
+/// the desktop app.
+fn ensure_daemon_running(sb: &Sandbox, token: &str) -> Result<(), i32> {
+    if health_ok(token) {
+        return Ok(());
+    }
+    step("starting cvisord in the microVM…");
+    let script = daemon_launch_script(token);
+    // The guest agent lags the boot, so a failed exec means "not up yet".
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if matches!(sb.command("sh").arg("-c").arg(&script).run(), Ok(res) if res.exit_code == 0) {
+            break;
+        }
+        if Instant::now() >= deadline {
+            eprintln!("cvisor: could not start cvisord in microVM '{VM_NAME}'");
+            eprintln!("        Inspect boot logs with: bsdkrun logs {VM_NAME}");
+            return Err(1);
+        }
+        std::thread::sleep(Duration::from_millis(1000));
+    }
+    wait_ready(token)
+}
+
+/// Shell run in the guest to (re)start `cvisord` detached, with the env the
+/// original boot gave it. Idempotent: it exits early if a daemon is already
+/// running, so retrying the exec never stacks up processes fighting for the
+/// listen ports.
+fn daemon_launch_script(token: &str) -> String {
+    format!(
+        r#"for p in /proc/[0-9]*; do
+    [ -r "$p/comm" ] || continue
+    read -r c < "$p/comm" || continue
+    [ "$c" = cvisord ] && exit 0
+done
+export CVISOR_TOKEN='{token}'
+export CVISOR_GRPC_ADDR='0.0.0.0:{GRPC_PORT}'
+export CVISOR_HTTP_ADDR='0.0.0.0:{HTTP_PORT}'
+mkdir -p /var/log
+launch() {{
+    if command -v setsid >/dev/null 2>&1; then setsid cvisord; else cvisord; fi
+}}
+launch >/var/log/cvisord.log 2>&1 </dev/null &
+"#,
+        token = sh_quoted(token),
+    )
+}
+
+/// The body of a single-quoted shell word: `'` closes, escapes, and reopens.
+fn sh_quoted(s: &str) -> String {
+    s.replace('\'', r"'\''")
 }
 
 /// Run `cvisor doctor` inside the VM (streamed), retrying while the guest agent
@@ -404,6 +462,9 @@ fn wait_ready(token: &str) -> Result<(), i32> {
             }
             eprintln!("cvisor: timed out waiting for cvisord (127.0.0.1:{GRPC_PORT})");
             eprintln!("        Inspect boot logs with: bsdkrun logs {VM_NAME}");
+            eprintln!(
+                "        Daemon log:             bsdkrun exec {VM_NAME} cat /var/log/cvisord.log"
+            );
             return Err(1);
         }
         eprint!(".");
