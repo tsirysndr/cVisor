@@ -1,0 +1,8 @@
+# Toolchain for the cVisor console, pinned to exact versions so every machine
+# runs the same thing. babashka runs the `bb` tasks; clojure runs the `:rebel`
+# REPL and the SDK commands; the JDK backs both (Java 22+ is also what the Scala
+# SDK's FFM path and `-release 22` need, so an LTS >= 22 is pinned).
+[tools]
+babashka = "1.13.219"
+clojure = "1.12.5.1664"
+java = "temurin-25.0.4+7.0.LTS"

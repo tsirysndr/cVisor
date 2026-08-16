@@ -1,0 +1,89 @@
+{:paths ["src"]
+ :deps  {babashka/process {:mvn/version "0.5.22"}
+         babashka/fs      {:mvn/version "0.5.22"}}
+
+ :tasks
+ {:requires ([console.core :as c])
+
+  ;; ── meta ─────────────────────────────────────────────────────
+  help {:doc "Show all available console commands"
+        :task (c/help)}
+  ls   {:doc "List every registered command grouped by namespace"
+        :task (c/ls)}
+
+  ;; ── build (Rust workspace + cargo xtask) ─────────────────────
+  fmt            {:doc "cargo fmt --all"
+                  :task (do (require 'console.build) ((resolve 'console.build/fmt)))}
+  fmt-check      {:task (do (require 'console.build) ((resolve 'console.build/fmt-check)))}
+  clippy         {:doc "cargo clippy --tests -D warnings"
+                  :task (do (require 'console.build) ((resolve 'console.build/clippy)))}
+  test           {:doc "cargo test -p cvisor-core (pure-logic, any host)"
+                  :task (do (require 'console.build) ((resolve 'console.build/test)))}
+  cli            {:doc "release build of the cvisor CLI"
+                  :task (do (require 'console.build) ((resolve 'console.build/cli)))}
+  daemon         {:doc "release build of the cvisord daemon"
+                  :task (do (require 'console.build) ((resolve 'console.build/daemon)))}
+  run            {:doc "cargo run cvisor -- <args>. Usage: bb run -- uname -a"
+                  :task (do (require 'console.build)
+                            (apply (resolve 'console.build/run) *command-line-args*))}
+  xtask-test     {:doc "cargo xtask test [arch] — full seccomp e2e in Alpine"
+                  :task (do (require 'console.build)
+                            (if-let [a (first *command-line-args*)]
+                              ((resolve 'console.build/xtask-test) (keyword a))
+                              ((resolve 'console.build/xtask-test))))}
+  xtask-run      {:task (do (require 'console.build) ((resolve 'console.build/xtask-run)))}
+  ffi            {:doc "cargo xtask ffi [arch] — build+distribute libcvisor.so"
+                  :task (do (require 'console.build)
+                            (if-let [a (first *command-line-args*)]
+                              ((resolve 'console.build/ffi) (keyword a))
+                              ((resolve 'console.build/ffi))))}
+  run-node       {:task (do (require 'console.build) ((resolve 'console.build/run-node)))}
+  node-artifacts {:task (do (require 'console.build) ((resolve 'console.build/node-artifacts)))}
+  clean          {:doc "cargo clean"
+                  :task (do (require 'console.build) ((resolve 'console.build/clean)))}
+
+  ;; ── sdk (the ten language packages; lang is a keyword — `bb` hands us
+  ;;         strings, so each task coerces the first CLI arg) ─────────────
+  sdk:deps      {:doc "Fetch deps. Usage: bb sdk:deps <node|elixir|gleam>"
+                 :task (do (require 'console.sdk)
+                           ((resolve 'console.sdk/deps) (keyword (first *command-line-args*))))}
+  sdk:test      {:doc "Native FFI suite (Linux+libcvisor). Usage: bb sdk:test <lang>"
+                 :task (do (require 'console.sdk)
+                           ((resolve 'console.sdk/test) (keyword (first *command-line-args*))))}
+  sdk:smoke     {:doc "GraphQL remote smoke vs a daemon. Usage: bb sdk:smoke <lang>"
+                 :task (do (require 'console.sdk)
+                           ((resolve 'console.sdk/smoke) (keyword (first *command-line-args*))))}
+  sdk:lint      {:doc "Lint. Usage: bb sdk:lint <rust|go>"
+                 :task (do (require 'console.sdk)
+                           ((resolve 'console.sdk/lint) (keyword (first *command-line-args*))))}
+  sdk:build     {:doc "Build the artifact. Usage: bb sdk:build <lang>"
+                 :task (do (require 'console.sdk)
+                           ((resolve 'console.sdk/build) (keyword (first *command-line-args*))))}
+  sdk:install   {:doc "Install locally. Usage: bb sdk:install <clojure>"
+                 :task (do (require 'console.sdk)
+                           ((resolve 'console.sdk/install) (keyword (first *command-line-args*))))}
+  sdk:publish   {:doc "Publish to the registry. Usage: bb sdk:publish <lang> [args...]"
+                 :task (do (require 'console.sdk)
+                           (let [[lang & args] *command-line-args*]
+                             (apply (resolve 'console.sdk/publish) (keyword lang) args)))}
+  sdk:smoke-all {:doc "Every SDK's GraphQL smoke in turn (needs a running daemon)"
+                 :task (do (require 'console.sdk) ((resolve 'console.sdk/smoke-all)))}
+
+  ;; ── ui (web SPA + Tauri desktop shell) ───────────────────────
+  ui:install {:task (do (require 'console.ui) ((resolve 'console.ui/install)))}
+  ui:dev     {:doc "bun run dev — Vite dev server"
+              :task (do (require 'console.ui) ((resolve 'console.ui/dev)))}
+  ui:build   {:doc "bun run build — into ui/dist"
+              :task (do (require 'console.ui) ((resolve 'console.ui/build)))}
+  ui:preview {:task (do (require 'console.ui) ((resolve 'console.ui/preview)))}
+  ui:tauri   {:doc "bun run tauri <sub>. Usage: bb ui:tauri dev|build"
+              :task (do (require 'console.ui)
+                        (apply (resolve 'console.ui/tauri) *command-line-args*))}
+
+  ;; ── docker (published images) ────────────────────────────────
+  docker:build     {:doc "Build one image variant. Usage: bb docker:build <alpine|trixie|ubuntu>"
+                    :task (do (require 'console.docker)
+                              (let [[v & args] *command-line-args*]
+                                (apply (resolve 'console.docker/build) (keyword v) args)))}
+  docker:build-all {:doc "Build all three variants"
+                    :task (do (require 'console.docker) ((resolve 'console.docker/build-all)))}}}

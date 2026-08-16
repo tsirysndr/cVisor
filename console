@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# cVisor command console — a Clojure + rebel REPL that centralizes every
+# monorepo command (the Rust CLI/daemon build cycle, all ten SDKs, the web UI +
+# desktop shell, and the container images). Requires the toolchain from mise
+# (`cd tools/console && mise install`).
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+export CVISOR_ROOT="$ROOT"
+cd "$ROOT/tools/console"
+exec clojure -M:rebel
