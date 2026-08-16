@@ -1,3 +1,5 @@
+![cVisor UI — sandbox list with an attached terminal](.github/assets/preview.png)
+
 # cVisor — an in-process Linux sandbox for untrusted & LLM-generated code
 [![CI](https://github.com/tsirysndr/bVisor/actions/workflows/ci.yml/badge.svg)](https://github.com/tsirysndr/bVisor/actions/workflows/ci.yml)
 
