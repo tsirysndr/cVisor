@@ -1,0 +1,22 @@
+{
+  "name": "@cvisor/cli-linux-arm64",
+  "version": "0.1.0",
+  "description": "Prebuilt cvisor + cvisord binaries for Linux aarch64 (static musl)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tsirysndr/cVisor.git",
+    "directory": "npm/linux-arm64"
+  },
+  "homepage": "https://github.com/tsirysndr/cVisor",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "preferUnplugged": true
+}

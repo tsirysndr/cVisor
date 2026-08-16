@@ -1,0 +1,22 @@
+{
+  "name": "@cvisor/cli-linux-x64",
+  "version": "0.1.0",
+  "description": "Prebuilt cvisor + cvisord binaries for Linux x86_64 (static musl)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tsirysndr/cVisor.git",
+    "directory": "npm/linux-x64"
+  },
+  "homepage": "https://github.com/tsirysndr/cVisor",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "preferUnplugged": true
+}

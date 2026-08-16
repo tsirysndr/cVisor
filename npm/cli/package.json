@@ -1,0 +1,37 @@
+{
+  "name": "@cvisor/cli",
+  "version": "0.1.0",
+  "description": "cVisor CLI — a lightweight in-process Linux sandbox for untrusted and LLM-generated code",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tsirysndr/cVisor.git",
+    "directory": "npm/cli"
+  },
+  "homepage": "https://github.com/tsirysndr/cVisor",
+  "bin": {
+    "cvisor": "bin/cvisor.js",
+    "cvisord": "bin/cvisord.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@cvisor/cli-linux-x64": "0.1.0",
+    "@cvisor/cli-linux-arm64": "0.1.0",
+    "@cvisor/cli-darwin-arm64": "0.1.0"
+  },
+  "keywords": [
+    "cvisor",
+    "sandbox",
+    "seccomp",
+    "isolation",
+    "gvisor",
+    "cli"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@cvisor/cli-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Prebuilt cvisor binary for macOS on Apple silicon",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tsirysndr/cVisor.git",
+    "directory": "npm/darwin-arm64"
+  },
+  "homepage": "https://github.com/tsirysndr/cVisor",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "preferUnplugged": true
+}

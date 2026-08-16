@@ -32,6 +32,7 @@ remote `cvisord` over gRPC/GraphQL from **any OS, including macOS**.
 - [Quick try](#quick-try)
 - [Usage](#usage)
 - [Command-line](#command-line)
+  - [Install](#install)
   - [Docker](#docker)
   - [Nix](#nix)
 - [Daemon (`cvisord`)](#daemon-cvisord)
@@ -173,6 +174,25 @@ persist.
 newest archive with that key prefix. The distributed binaries built by CI enable
 all formats and the S3 backend.
 
+### Install
+
+```bash
+npm install -g @cvisor/cli
+```
+
+npm picks the prebuilt package for your host — `cvisor` everywhere, plus the
+`cvisord` daemon on Linux:
+
+| Host                | Package                    | Binaries            |
+| ------------------- | -------------------------- | ------------------- |
+| Linux x86_64        | `@cvisor/cli-linux-x64`    | `cvisor`, `cvisord` |
+| Linux aarch64       | `@cvisor/cli-linux-arm64`  | `cvisor`, `cvisord` |
+| macOS Apple silicon | `@cvisor/cli-darwin-arm64` | `cvisor`            |
+
+The same binaries ship as `cvisor-<os>-<arch>.tar.gz` on each
+[GitHub Release](https://github.com/tsirysndr/cVisor/releases) (tag `v*`); the
+Linux ones are static musl builds, so they run on any distro.
+
 ### Docker
 
 A prebuilt Alpine image (all features — every archive format and the S3 cache
@@ -185,8 +205,6 @@ docker run --rm --security-opt seccomp=unconfined ghcr.io/tsirysndr/cvisor -- un
 ```
 
 Or build it yourself from the repo `Dockerfile` (`docker build -t cvisor .`).
-Prebuilt static binaries for linux x86_64 and aarch64 are attached to each
-[GitHub Release](https://github.com/tsirysndr/cVisor/releases) (tag `v*`).
 
 ### Nix
 

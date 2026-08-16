@@ -37,3 +37,8 @@ ui/src-tauri/gen/
 
 # scratch e2e scripts
 ui/*.tmp.ts
+
+# Release binaries unpacked into the npm platform packages by CI.
+npm/linux-x64/bin/
+npm/linux-arm64/bin/
+npm/darwin-arm64/bin/
