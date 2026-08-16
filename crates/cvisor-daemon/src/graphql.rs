@@ -234,6 +234,22 @@ impl Query {
     async fn session_exit(&self, ctx: &Context<'_>, id: String) -> Option<i32> {
         reg(ctx).session(&id).and_then(|s| s.try_wait())
     }
+
+    /// List saved overlay snapshots.
+    async fn snapshots(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<CacheEntry>> {
+        let reg = reg(ctx);
+        let entries = spawn_blocking(move || reg.list_snapshots())
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.to_string()))?;
+        Ok(entries
+            .into_iter()
+            .map(|e| CacheEntry {
+                name: e.name,
+                size: e.size as i64,
+            })
+            .collect())
+    }
 }
 
 pub struct Mutation;
@@ -478,6 +494,79 @@ impl Mutation {
         let existed = reg.session(&id).is_some();
         reg.end_session(&id);
         existed
+    }
+
+    /// Snapshot a sandbox's overlay; a null/empty `snapshot_id` gets a generated
+    /// id. Returns the snapshot id.
+    async fn snapshot(
+        &self,
+        ctx: &Context<'_>,
+        id: String,
+        snapshot_id: Option<String>,
+    ) -> async_graphql::Result<String> {
+        let reg = reg(ctx);
+        let snapshot_id = snapshot_id.unwrap_or_default();
+        spawn_blocking(move || reg.snapshot(&id, &snapshot_id))
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.to_string()))
+    }
+
+    /// Replace a sandbox's overlay with a snapshot (discard changes since).
+    async fn rollback(
+        &self,
+        ctx: &Context<'_>,
+        id: String,
+        snapshot_id: String,
+    ) -> async_graphql::Result<bool> {
+        let reg = reg(ctx);
+        spawn_blocking(move || reg.rollback(&id, &snapshot_id))
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.to_string()))?;
+        Ok(true)
+    }
+
+    /// Create a new sandbox from a snapshot; a null/empty name gets a random one.
+    async fn branch(
+        &self,
+        ctx: &Context<'_>,
+        snapshot_id: String,
+        name: Option<String>,
+    ) -> async_graphql::Result<Sandbox> {
+        let reg = reg(ctx);
+        let name = name.unwrap_or_default();
+        let info = spawn_blocking(move || reg.branch(&snapshot_id, &name))
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.to_string()))?;
+        Ok(info.into())
+    }
+
+    /// Fork a live sandbox's current overlay into a new sandbox; a null/empty
+    /// name gets a random one.
+    async fn fork(
+        &self,
+        ctx: &Context<'_>,
+        id: String,
+        name: Option<String>,
+    ) -> async_graphql::Result<Sandbox> {
+        let reg = reg(ctx);
+        let name = name.unwrap_or_default();
+        let info = spawn_blocking(move || reg.fork(&id, &name))
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.to_string()))?;
+        Ok(info.into())
+    }
+
+    /// Delete a snapshot; returns whether it existed.
+    async fn delete_snapshot(&self, ctx: &Context<'_>, id: String) -> async_graphql::Result<bool> {
+        let reg = reg(ctx);
+        spawn_blocking(move || reg.delete_snapshot(&id))
+            .await
+            .map_err(|e| Error::new(e.to_string()))?
+            .map_err(|e| Error::new(e.to_string()))
     }
 }
 

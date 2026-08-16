@@ -25,6 +25,15 @@ service Cvisor {
   rpc CopyInto(CopyRequest) returns (Empty);
   rpc CopyOut(CopyRequest) returns (Empty);
 
+  // Snapshots: capture a sandbox's overlay, branch/fork a new sandbox from it,
+  // or roll a sandbox back to one.
+  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
+  rpc Rollback(RollbackRequest) returns (Empty);
+  rpc Branch(BranchRequest) returns (Sandbox);
+  rpc Fork(ForkRequest) returns (Sandbox);
+  rpc ListSnapshots(Empty) returns (CacheEntries);
+  rpc DeleteSnapshot(SnapshotRef) returns (CacheRemoved);
+
   // Keyed archive cache of a sandbox directory.
   rpc CacheSave(CacheRequest) returns (Empty);
   rpc CacheRestore(CacheRequest) returns (Empty);
@@ -132,5 +141,14 @@ message CacheEntries { repeated CacheEntry entries = 1; }
 message CacheEntry { string name = 1; uint64 size = 2; }
 message CacheRemoveRequest { string key = 1; string backend = 2; string format = 3; }
 message CacheRemoved { bool removed = 1; uint32 count = 2; }
+
+// Snapshots. `id` refers to a sandbox (id or name); `snapshot_id` names a
+// snapshot (empty on Snapshot → generated).
+message SnapshotRequest { string id = 1; string snapshot_id = 2; }
+message SnapshotResponse { string snapshot_id = 1; }
+message RollbackRequest { string id = 1; string snapshot_id = 2; }
+message BranchRequest { string snapshot_id = 1; string name = 2; }
+message ForkRequest { string id = 1; string name = 2; }
+message SnapshotRef { string id = 1; }
 
 message HealthResponse { string version = 1; bool ok = 2; }

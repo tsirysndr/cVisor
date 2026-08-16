@@ -348,6 +348,67 @@ impl Registry {
         copy_out_of(uid, guest, Path::new(host)).map_err(|e| Error(format!("copy_out failed: {e}")))
     }
 
+    /// Snapshot a sandbox's overlay under `id` (empty → a generated id). Returns
+    /// the snapshot id.
+    pub fn snapshot(&self, r: &str, id: &str) -> Result<String> {
+        let uid = self.uid_of(r)?;
+        let id = if id.is_empty() {
+            short_id()
+        } else {
+            id.to_string()
+        };
+        cvisor_core::snapshot::snapshot(uid, &id)
+            .map_err(|e| Error(format!("snapshot failed: {e}")))?;
+        Ok(id)
+    }
+
+    /// Replace a sandbox's overlay with a snapshot (discard changes since).
+    pub fn rollback(&self, r: &str, snapshot_id: &str) -> Result<()> {
+        let uid = self.uid_of(r)?;
+        cvisor_core::snapshot::rollback(uid, snapshot_id)
+            .map_err(|e| Error(format!("rollback failed: {e}")))
+    }
+
+    /// Create a new sandbox whose overlay comes from a snapshot.
+    pub fn branch(&self, snapshot_id: &str, name: &str) -> Result<SandboxInfo> {
+        let info = self.create_sandbox((!name.is_empty()).then_some(name));
+        let uid = self.uid_of(&info.id)?;
+        if let Err(e) = cvisor_core::snapshot::branch(snapshot_id, uid) {
+            let _ = self.free_sandbox(&info.id);
+            return Err(Error(format!("branch failed: {e}")));
+        }
+        Ok(info)
+    }
+
+    /// Create a new sandbox forked from a live sandbox's current overlay.
+    pub fn fork(&self, r: &str, name: &str) -> Result<SandboxInfo> {
+        let src = self.uid_of(r)?;
+        let info = self.create_sandbox((!name.is_empty()).then_some(name));
+        let uid = self.uid_of(&info.id)?;
+        if let Err(e) = cvisor_core::snapshot::fork(src, uid) {
+            let _ = self.free_sandbox(&info.id);
+            return Err(Error(format!("fork failed: {e}")));
+        }
+        Ok(info)
+    }
+
+    pub fn list_snapshots(&self) -> Result<Vec<CacheEntry>> {
+        cvisor_core::snapshot::list()
+            .map(|v| {
+                v.into_iter()
+                    .map(|s| CacheEntry {
+                        name: s.id,
+                        size: s.size,
+                    })
+                    .collect()
+            })
+            .map_err(|e| Error(format!("list snapshots failed: {e}")))
+    }
+
+    pub fn delete_snapshot(&self, id: &str) -> Result<bool> {
+        cvisor_core::snapshot::delete(id).map_err(|e| Error(format!("delete snapshot failed: {e}")))
+    }
+
     pub fn cache_save(
         &self,
         r: &str,

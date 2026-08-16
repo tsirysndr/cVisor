@@ -413,6 +413,73 @@ impl Cvisor for Grpc {
         }))
     }
 
+    async fn snapshot(
+        &self,
+        req: Request<pb::SnapshotRequest>,
+    ) -> Result<Response<pb::SnapshotResponse>, Status> {
+        let r = req.into_inner();
+        let reg = self.reg.clone();
+        let snapshot_id = block(move || reg.snapshot(&r.id, &r.snapshot_id)).await?;
+        Ok(Response::new(pb::SnapshotResponse { snapshot_id }))
+    }
+
+    async fn rollback(
+        &self,
+        req: Request<pb::RollbackRequest>,
+    ) -> Result<Response<pb::Empty>, Status> {
+        let r = req.into_inner();
+        let reg = self.reg.clone();
+        block(move || reg.rollback(&r.id, &r.snapshot_id)).await?;
+        Ok(Response::new(pb::Empty {}))
+    }
+
+    async fn branch(
+        &self,
+        req: Request<pb::BranchRequest>,
+    ) -> Result<Response<pb::Sandbox>, Status> {
+        let r = req.into_inner();
+        let reg = self.reg.clone();
+        let info = block(move || reg.branch(&r.snapshot_id, &r.name)).await?;
+        Ok(Response::new(sandbox_to(info)))
+    }
+
+    async fn fork(&self, req: Request<pb::ForkRequest>) -> Result<Response<pb::Sandbox>, Status> {
+        let r = req.into_inner();
+        let reg = self.reg.clone();
+        let info = block(move || reg.fork(&r.id, &r.name)).await?;
+        Ok(Response::new(sandbox_to(info)))
+    }
+
+    async fn list_snapshots(
+        &self,
+        _req: Request<pb::Empty>,
+    ) -> Result<Response<pb::CacheEntries>, Status> {
+        let reg = self.reg.clone();
+        let entries = block(move || reg.list_snapshots()).await?;
+        Ok(Response::new(pb::CacheEntries {
+            entries: entries
+                .into_iter()
+                .map(|e| pb::CacheEntry {
+                    name: e.name,
+                    size: e.size,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn delete_snapshot(
+        &self,
+        req: Request<pb::SnapshotRef>,
+    ) -> Result<Response<pb::CacheRemoved>, Status> {
+        let id = req.into_inner().id;
+        let reg = self.reg.clone();
+        let removed = block(move || reg.delete_snapshot(&id)).await?;
+        Ok(Response::new(pb::CacheRemoved {
+            removed,
+            count: removed as u32,
+        }))
+    }
+
     async fn health(
         &self,
         _req: Request<pb::Empty>,

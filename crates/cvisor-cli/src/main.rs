@@ -56,6 +56,10 @@ USAGE:
     cvisor [OPTIONS] cache restore <KEY> <sb:PATH>   restore into a sandbox dir
     cvisor [OPTIONS] cache ls                        list cached archives
     cvisor [OPTIONS] cache rm <KEY> | --all          delete cache entries
+    cvisor --sandbox <n> snapshot [ID]   capture the sandbox overlay (prints ID)
+    cvisor --sandbox <n> rollback <ID>   restore the sandbox to a snapshot
+    cvisor --sandbox <n> branch <ID>     populate the sandbox from a snapshot
+    cvisor snapshots [ls|rm <ID>]        list or delete snapshots
     cvisor doctor                        check the host can run the sandbox
 
     In `cp`, prefix the sandbox side with `sb:` — e.g.
@@ -85,6 +89,11 @@ OPTIONS:
         Interactive,
         Cp { src: String, dst: String },
         Cache(CacheCmd),
+        Snapshot(Option<String>), // capture the sandbox overlay (id optional)
+        Rollback(String),         // restore the sandbox to a snapshot
+        Branch(String),           // populate the sandbox from a snapshot
+        Snapshots,                // list snapshots
+        SnapshotRm(String),       // delete a snapshot
         Doctor,
     }
 
@@ -160,6 +169,28 @@ OPTIONS:
                         other => return Err(format!("unknown cache op: {other}")),
                     };
                     action = Action::Cache(cmd);
+                    break;
+                }
+                "snapshot" => {
+                    action = Action::Snapshot(args.next());
+                    break;
+                }
+                "rollback" => {
+                    action = Action::Rollback(args.next().ok_or("rollback needs a <snapshot-id>")?);
+                    break;
+                }
+                "branch" => {
+                    action = Action::Branch(args.next().ok_or("branch needs a <snapshot-id>")?);
+                    break;
+                }
+                "snapshots" => {
+                    action = match args.next().as_deref() {
+                        None | Some("ls") => Action::Snapshots,
+                        Some("rm") => Action::SnapshotRm(
+                            args.next().ok_or("snapshots rm needs a <snapshot-id>")?,
+                        ),
+                        Some(other) => return Err(format!("unknown snapshots op: {other}")),
+                    };
                     break;
                 }
                 "doctor" => {
@@ -246,8 +277,71 @@ OPTIONS:
             Action::Run(cmd) if !cmd.is_empty() => run_command(uid, cmd, opts.exec),
             Action::Cp { src, dst } => cmd_cp(uid, src, dst),
             Action::Cache(cmd) => cmd_cache(uid, cmd, opts.format, &opts.cache_backend),
+            Action::Snapshot(id) => cmd_snapshot(uid, id.as_deref()),
+            Action::Rollback(id) => cmd_snap(cvisor_core::snapshot::rollback(uid, id), "rollback"),
+            Action::Branch(id) => cmd_snap(cvisor_core::snapshot::branch(id, uid), "branch"),
+            Action::Snapshots => cmd_snapshots(),
+            Action::SnapshotRm(id) => cmd_snapshot_rm(id),
             Action::Doctor => cmd_doctor(),
             _ => run_interactive(uid, opts.exec),
+        }
+    }
+
+    /// `cvisor snapshot [id]`: capture the sandbox's overlay; prints the id.
+    fn cmd_snapshot(uid: [u8; 16], id: Option<&str>) -> i32 {
+        let id = id.map(String::from).unwrap_or_else(|| {
+            let u = generate_uid();
+            format!("snap-{}", String::from_utf8_lossy(&u[..8]))
+        });
+        match cvisor_core::snapshot::snapshot(uid, &id) {
+            Ok(()) => {
+                println!("{id}");
+                0
+            }
+            Err(e) => {
+                eprintln!("cvisor: snapshot failed: {e}");
+                1
+            }
+        }
+    }
+
+    /// Report the result of a snapshot rollback/branch.
+    fn cmd_snap(result: cvisor_core::SysResult<()>, verb: &str) -> i32 {
+        match result {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("cvisor: {verb} failed: {e}");
+                1
+            }
+        }
+    }
+
+    fn cmd_snapshots() -> i32 {
+        match cvisor_core::snapshot::list() {
+            Ok(snaps) => {
+                for s in snaps {
+                    println!("{}\t{}", s.id, s.size);
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("cvisor: {e}");
+                1
+            }
+        }
+    }
+
+    fn cmd_snapshot_rm(id: &str) -> i32 {
+        match cvisor_core::snapshot::delete(id) {
+            Ok(true) => 0,
+            Ok(false) => {
+                eprintln!("cvisor: no such snapshot: {id}");
+                1
+            }
+            Err(e) => {
+                eprintln!("cvisor: {e}");
+                1
+            }
         }
     }
 

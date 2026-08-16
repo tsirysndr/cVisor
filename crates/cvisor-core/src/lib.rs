@@ -12,6 +12,7 @@ pub mod cgroup;
 pub mod error;
 pub mod fileio;
 pub mod log_buffer;
+pub mod snapshot;
 pub mod types;
 
 pub mod procinfo;

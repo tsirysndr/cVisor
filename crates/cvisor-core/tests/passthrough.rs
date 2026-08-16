@@ -471,6 +471,35 @@ fn allow_listen_gates_fixed_port_bind() {
 }
 
 #[test]
+fn snapshot_rollback_and_branch() {
+    use cvisor_core::{cleanup_overlay, generate_uid, read_file, snapshot, write_file};
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let uid = generate_uid();
+
+    write_file(uid, "/tmp/f.txt", b"v1").unwrap();
+    snapshot::snapshot(uid, "snap1").unwrap();
+
+    // Change after the snapshot, then roll back to it.
+    write_file(uid, "/tmp/f.txt", b"v2").unwrap();
+    assert_eq!(read_file(uid, "/tmp/f.txt").unwrap(), b"v2");
+    snapshot::rollback(uid, "snap1").unwrap();
+    assert_eq!(read_file(uid, "/tmp/f.txt").unwrap(), b"v1");
+
+    // Branch the snapshot into a fresh sandbox; it carries the snapshot's state
+    // and diverges independently.
+    let child = generate_uid();
+    snapshot::branch("snap1", child).unwrap();
+    assert_eq!(read_file(child, "/tmp/f.txt").unwrap(), b"v1");
+    write_file(child, "/tmp/f.txt", b"child").unwrap();
+    assert_eq!(read_file(child, "/tmp/f.txt").unwrap(), b"child");
+    assert_eq!(read_file(uid, "/tmp/f.txt").unwrap(), b"v1"); // parent unchanged
+
+    assert!(snapshot::delete("snap1").unwrap());
+    cleanup_overlay(&uid);
+    cleanup_overlay(&child);
+}
+
+#[test]
 fn host_written_file_visible_to_run_and_readback() {
     use cvisor_core::{read_file, write_file};
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
