@@ -1,10 +1,11 @@
-target/
+**/target/
 **/node_modules/
+**/dist/
+**/.venv/
+**/_build/
+**/ebin/
 .git/
-sdks/**/dist/
-sdks/**/.venv/
-sdks/**/_build/
-sdks/**/ebin/
+.zig-cache/
 sdks/**/doc/
 **/*.so
 **/*.node
