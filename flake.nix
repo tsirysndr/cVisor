@@ -27,7 +27,15 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        src = craneLib.cleanCargoSource ./.;
+        # cleanCargoSource keeps only Rust/Cargo files, which drops
+        # cvisor-proto's .proto files that its build.rs feeds to protoc — so keep
+        # those too.
+        src = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          name = "source";
+          filter = path: type:
+            (pkgs.lib.hasSuffix ".proto" path) || (craneLib.filterCargoSources path type);
+        };
 
         # The web UI (ui/) is built with bun and embedded into the CLI via
         # rust-embed. Nix builds have no network, so dependency installation is a

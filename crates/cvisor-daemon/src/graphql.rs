@@ -513,8 +513,9 @@ impl Subscription {
     }
 }
 
-/// POST endpoint for queries and mutations. Authenticates the `Authorization`
-/// header before executing.
+/// POST endpoint for queries and mutations. Schema introspection is allowed
+/// anonymously (like gRPC reflection) so tools can fetch the schema; every other
+/// operation requires the bearer token in the `Authorization` header.
 pub async fn graphql_handler(
     schema: web::Data<CvisorSchema>,
     auth: web::Data<Arc<Auth>>,
@@ -525,11 +526,34 @@ pub async fn graphql_handler(
         .headers()
         .get(actix_web::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok());
-    if !auth.check_header(header) {
+    let req = req.into_inner();
+    if !auth.check_header(header) && !is_introspection_only(&req.query) {
         return HttpResponse::Unauthorized().finish();
     }
-    let resp = schema.execute(req.into_inner()).await;
+    let resp = schema.execute(req).await;
     HttpResponse::Ok().json(resp)
+}
+
+/// True if every top-level field of every operation is an introspection
+/// meta-field (`__schema` / `__type` / `__typename`) — GraphQL reserves the
+/// `__` prefix for introspection, so no data is reachable this way.
+fn is_introspection_only(query: &str) -> bool {
+    use async_graphql::parser::types::Selection;
+    let Ok(doc) = async_graphql::parser::parse_query(query) else {
+        return false;
+    };
+    let mut seen = false;
+    for (_, op) in doc.operations.iter() {
+        for item in &op.node.selection_set.node.items {
+            seen = true;
+            match &item.node {
+                Selection::Field(f) if f.node.name.node.starts_with("__") => {}
+                // A non-introspection field or a fragment could reach data.
+                _ => return false,
+            }
+        }
+    }
+    seen
 }
 
 /// Websocket endpoint for subscriptions. The bearer token is read from the
