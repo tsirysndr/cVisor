@@ -186,6 +186,20 @@ jobs:
             rust:latest cargo run --example remote_smoke 2>&1 | tee smoke.log
           grep -q RUST_GRAPHQL_OK smoke.log
 
+      # Scala 3 + sbt on JDK 25 (no temurin-22 image is published; JDK 25 both
+      # compiles `-release 22` and has the stable FFM API the native path uses).
+      # The sbt launcher fetches 1.10.7 per project/build.properties. The smoke
+      # is pure JDK HTTP — the native FFM path is only compiled, never loaded.
+      - name: Scala SDK (RemoteSandbox, java.net.http)
+        run: |
+          docker run --rm --network host \
+            -e CVISOR_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+            -e CVISOR_TOKEN=test-token \
+            -v "$PWD/sdks/scala:/sdk" -w /sdk \
+            sbtscala/scala-sbt:eclipse-temurin-25.0.3_9_1.x \
+            sbt -batch 'runMain dev.tsirysndr.cvisor.RemoteSmoke' 2>&1 | tee smoke.log
+          grep -q SCALA_GRAPHQL_OK smoke.log
+
       - name: cvisord logs + teardown
         if: always()
         run: |
