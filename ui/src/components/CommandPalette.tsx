@@ -3,6 +3,12 @@ import { Command } from "cmdk";
 import { useAtom, useSetAtom } from "jotai";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  IconArrowBackUp,
+  IconCamera,
+  IconGitBranch,
+  IconKeyboard,
+  IconLayoutBottombar,
+  IconLayoutSidebar,
   IconMoonStars,
   IconPlus,
   IconRefresh,
@@ -12,13 +18,18 @@ import {
 } from "@tabler/icons-react";
 import {
   createModalOpenAtom,
+  helpOpenAtom,
   paletteOpenAtom,
   runModalOpenAtom,
   selectedSandboxAtom,
   settingsOpenAtom,
+  sidebarVisibleAtom,
+  snapshotPickerAtom,
+  terminalPanelVisibleAtom,
   themeAtom,
 } from "../state/atoms";
 import { useFreeSandbox } from "../hooks/useSandboxes";
+import { useSnapshot } from "../hooks/useSnapshots";
 
 // Raycast-style palette (opened by "/" or Cmd/Ctrl-K). cmdk handles fuzzy
 // filtering + arrow-key nav; we own the overlay, backdrop, and Escape.
@@ -29,7 +40,12 @@ export function CommandPalette() {
   const setRunOpen = useSetAtom(runModalOpenAtom);
   const setCreateOpen = useSetAtom(createModalOpenAtom);
   const setSettingsOpen = useSetAtom(settingsOpenAtom);
+  const setHelpOpen = useSetAtom(helpOpenAtom);
+  const setSidebar = useSetAtom(sidebarVisibleAtom);
+  const setPanel = useSetAtom(terminalPanelVisibleAtom);
+  const setPicker = useSetAtom(snapshotPickerAtom);
   const free = useFreeSandbox();
+  const snapshot = useSnapshot();
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -50,13 +66,13 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-[15vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-[15vh]"
       onClick={() => setOpen(false)}
     >
       <Command
         label="Command palette"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-content3 bg-content1 shadow-2xl"
+        className="w-full max-w-lg overflow-hidden border border-content3 bg-content1 shadow-[0_0_30px_rgba(255,42,109,0.15)]"
       >
         <Command.Input
           autoFocus
@@ -69,7 +85,7 @@ export function CommandPalette() {
           </Command.Empty>
 
           <Command.Group
-            heading="Actions"
+            heading="Sandbox"
             className="px-1 text-[11px] uppercase tracking-wide text-default-400"
           >
             <Item
@@ -81,7 +97,7 @@ export function CommandPalette() {
             <Item
               icon={<IconTerminal2 size={16} />}
               disabled={!selected}
-              onSelect={() => run(() => setSelected(selected))}
+              onSelect={() => run(() => setPanel(true))}
             >
               Open terminal
             </Item>
@@ -90,6 +106,28 @@ export function CommandPalette() {
               onSelect={() => run(() => setRunOpen(true))}
             >
               Run command…
+            </Item>
+            <Item
+              icon={<IconCamera size={16} />}
+              disabled={!selected}
+              onSelect={() =>
+                run(() => selected && snapshot.mutate({ id: selected }))
+              }
+            >
+              Snapshot sandbox
+            </Item>
+            <Item
+              icon={<IconGitBranch size={16} />}
+              onSelect={() => run(() => setPicker("branch"))}
+            >
+              Branch from snapshot…
+            </Item>
+            <Item
+              icon={<IconArrowBackUp size={16} />}
+              disabled={!selected}
+              onSelect={() => run(() => setPicker("rollback"))}
+            >
+              Rollback to snapshot…
             </Item>
             <Item
               icon={<IconTrash size={16} />}
@@ -112,6 +150,18 @@ export function CommandPalette() {
             className="mt-2 px-1 text-[11px] uppercase tracking-wide text-default-400"
           >
             <Item
+              icon={<IconLayoutSidebar size={16} />}
+              onSelect={() => run(() => setSidebar((s) => !s))}
+            >
+              Toggle sidebar
+            </Item>
+            <Item
+              icon={<IconLayoutBottombar size={16} />}
+              onSelect={() => run(() => setPanel((p) => !p))}
+            >
+              Toggle terminal panel
+            </Item>
+            <Item
               icon={<IconRefresh size={16} />}
               onSelect={() => run(() => qc.invalidateQueries())}
             >
@@ -124,6 +174,12 @@ export function CommandPalette() {
               }
             >
               Toggle theme
+            </Item>
+            <Item
+              icon={<IconKeyboard size={16} />}
+              onSelect={() => run(() => setHelpOpen(true))}
+            >
+              Keyboard shortcuts
             </Item>
             <Item
               icon={<IconSettings size={16} />}
@@ -153,7 +209,7 @@ function Item({
     <Command.Item
       onSelect={onSelect}
       disabled={disabled}
-      className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-default-600 data-[disabled=true]:opacity-40"
+      className="flex items-center gap-2 px-3 py-2 text-sm text-default-600 data-[disabled=true]:opacity-40"
     >
       <span className="text-primary">{icon}</span>
       {children}

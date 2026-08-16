@@ -2,7 +2,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
-  Button,
   Input,
   Modal,
   ModalBody,
@@ -11,8 +10,13 @@ import {
   ModalHeader,
 } from "@heroui/react";
 import { useAtom, useSetAtom } from "jotai";
-import { createModalOpenAtom, selectedSandboxAtom } from "../state/atoms";
+import {
+  createModalOpenAtom,
+  selectedSandboxAtom,
+  terminalPanelVisibleAtom,
+} from "../state/atoms";
 import { useCreateSandbox } from "../hooks/useSandboxes";
+import { PrimaryButton, TextButton } from "./Buttons";
 
 const schema = z.object({
   name: z
@@ -26,6 +30,7 @@ type Values = z.infer<typeof schema>;
 export function CreateSandboxModal() {
   const [open, setOpen] = useAtom(createModalOpenAtom);
   const setSelected = useSetAtom(selectedSandboxAtom);
+  const setPanel = useSetAtom(terminalPanelVisibleAtom);
   const create = useCreateSandbox();
 
   const {
@@ -39,6 +44,7 @@ export function CreateSandboxModal() {
     create.mutate(values.name || undefined, {
       onSuccess: (sb) => {
         setSelected(sb.id);
+        setPanel(true);
         reset();
         setOpen(false);
       },
@@ -56,18 +62,17 @@ export function CreateSandboxModal() {
               autoFocus
               label="Name (optional)"
               variant="bordered"
+              radius="none"
               placeholder="leave blank for a random name"
               isInvalid={!!errors.name}
               errorMessage={errors.name?.message}
             />
           </ModalBody>
           <ModalFooter>
-            <Button variant="flat" onPress={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" color="primary" isLoading={create.isPending}>
+            <TextButton onPress={() => setOpen(false)}>Cancel</TextButton>
+            <PrimaryButton type="submit" isLoading={create.isPending}>
               Create
-            </Button>
+            </PrimaryButton>
           </ModalFooter>
         </form>
       </ModalContent>

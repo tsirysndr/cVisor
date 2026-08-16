@@ -1,15 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <!-- cVisor mark: rounded "sandbox" tile with a charm-purple "cV" glyph. -->
+  <!-- cVisor mark: a minimalist neon isometric box glowing in synthwave
+       magenta + cyan on a near-black rounded tile. -->
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#874BFD"/>
-      <stop offset="1" stop-color="#7D56F4"/>
-    </linearGradient>
+    <filter id="neon" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
-  <rect x="16" y="16" width="480" height="480" rx="112" fill="#171717"/>
-  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#2E2E34" stroke-width="4"/>
-  <!-- c -->
-  <path d="M300 168a92 92 0 100 176" fill="none" stroke="url(#g)" stroke-width="44" stroke-linecap="round"/>
-  <!-- V -->
-  <path d="M176 344l40-176 40 176" fill="none" stroke="url(#g)" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#0B0B0D"/>
+  <g filter="url(#neon)" fill="none" stroke-width="16" stroke-linejoin="round" stroke-linecap="round">
+    <!-- top face -->
+    <path d="M256 96 400 180 256 264 112 180Z" stroke="#05D9E8"/>
+    <!-- left, right and center vertical edges + bottom -->
+    <path d="M112 180 112 332 256 416 400 332 400 180" stroke="#FF2A6D"/>
+    <path d="M256 264 256 416" stroke="#FF2A6D"/>
+  </g>
 </svg>

@@ -11,12 +11,14 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
 
+// The active theme (`dark`/`light`) is driven onto <html> by applyTheme; this
+// wrapper just carries the semantic background/text tokens.
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <JotaiProvider>
       <QueryClientProvider client={queryClient}>
         <HeroUIProvider>
-          <div className="dark text-foreground bg-background min-h-screen">
+          <div className="min-h-screen bg-background text-foreground">
             <App />
           </div>
         </HeroUIProvider>

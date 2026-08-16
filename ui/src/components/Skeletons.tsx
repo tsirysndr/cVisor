@@ -1,9 +1,9 @@
 import ContentLoader from "react-content-loader";
 
-// Animated placeholders tuned to the dark Charmbracelet surfaces. Preferred
-// over spinners for list/content loading states.
-const BASE = "#1E1E22";
-const HIGHLIGHT = "#2A2A30";
+// Animated placeholders tuned to the synthwave dark surfaces. Preferred over
+// spinners for list/content loading states.
+const BASE = "#190D2E";
+const HIGHLIGHT = "#2C1B45";
 
 export function SandboxListSkeleton({ rows = 5 }: { rows?: number }) {
   return (
@@ -44,6 +44,15 @@ export function InlineSkeleton({
     >
       <rect x="0" y="0" rx="4" ry="4" width={width} height={height} />
     </ContentLoader>
+  );
+}
+
+export function LoadingMoreRow() {
+  return (
+    <div className="flex items-center justify-center gap-2 py-3 text-[11px] text-default-400">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-secondary shadow-[0_0_6px_#05D9E8]" />
+      loading more…
+    </div>
   );
 }
 

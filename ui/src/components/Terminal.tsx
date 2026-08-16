@@ -2,86 +2,88 @@ import { useEffect, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { getWsClient } from "../graphql/ws";
-import { SESSION_OUTPUT } from "../graphql/queries";
-import {
-  killSession,
-  resizeSession,
-  startSession,
-  writeSession,
-} from "../hooks/useSession";
-import { b64ToBytes, strToB64 } from "../lib/base64";
+import { getTransport, type TerminalSession } from "../transport";
 
-// Bound to a sandbox: start a PTY session, stream sessionOutput -> xterm, and
-// pipe keystrokes/resizes back through the session mutations.
+// Bound to a sandbox: open an interactive PTY session through the active
+// transport, stream its output into xterm, and pipe keystrokes/resizes back.
 export function Terminal({ sandboxId }: { sandboxId: string }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
+    const container = containerRef.current;
+    if (!container) return;
 
     const term = new XTerm({
       convertEol: true,
       fontSize: 13,
       fontFamily: "'Agave Nerd Font', 'Agave', ui-monospace, monospace",
       cursorBlink: true,
-      theme: { background: "#171717", foreground: "#FAFAFA" },
+      theme: {
+        background: "#0D0221",
+        foreground: "#F5F5FF",
+        cursor: "#FF2A6D",
+        cursorAccent: "#0D0221",
+        selectionBackground: "#B026FF66",
+      },
     });
     const fit = new FitAddon();
+    // Load the addon before open() so it can attach to the terminal element.
     term.loadAddon(fit);
-    term.open(el);
-    fit.fit();
+    term.open(container);
 
-    let sessionId: string | null = null;
-    let unsubscribe: (() => void) | null = null;
+    let session: TerminalSession | null = null;
     let disposed = false;
 
-    const start = async () => {
-      sessionId = await startSession(sandboxId, "", true);
-      if (disposed) {
-        await killSession(sessionId);
-        return;
+    // Only fit once the terminal is attached AND the container has real layout;
+    // fitting a 0-size element throws inside FitAddon (reads `.dimensions`).
+    const doFit = () => {
+      if (!term.element) return;
+      if (container.clientWidth <= 0 || container.clientHeight <= 0) return;
+      try {
+        fit.fit();
+        session?.resize(term.rows, term.cols);
+      } catch {
+        // Layout not ready yet; a later ResizeObserver tick will retry.
       }
-      await resizeSession(sessionId, term.rows, term.cols);
+    };
 
-      unsubscribe = getWsClient().subscribe<{ sessionOutput: string }>(
-        { query: SESSION_OUTPUT, variables: { id: sessionId } },
-        {
-          next: ({ data }) => {
-            const chunk = data?.sessionOutput;
-            if (chunk) term.write(b64ToBytes(chunk));
-          },
-          error: (err) =>
-            term.write(`\r\n\x1b[31m[stream error] ${String(err)}\x1b[0m\r\n`),
-          complete: () => {},
-        },
-      );
+    let raf = requestAnimationFrame(doFit);
 
-      term.onData((data) => {
-        if (sessionId) void writeSession(sessionId, strToB64(data));
+    // Keystrokes -> session stdin (buffered until the session is ready).
+    term.onData((data) => session?.write(new TextEncoder().encode(data)));
+
+    getTransport()
+      .openTerminal(sandboxId, (bytes) => term.write(bytes))
+      .then((s) => {
+        if (disposed) {
+          s.close();
+          return;
+        }
+        session = s;
+        raf = requestAnimationFrame(doFit);
+      })
+      .catch((e) => {
+        term.write(`\r\n\x1b[31m[session error] ${String(e)}\x1b[0m\r\n`);
       });
-    };
 
-    void start();
-
-    const onResize = () => {
-      fit.fit();
-      if (sessionId) void resizeSession(sessionId, term.rows, term.cols);
-    };
-    window.addEventListener("resize", onResize);
-    const ro = new ResizeObserver(onResize);
-    ro.observe(el);
+    let debounce: number | undefined;
+    const ro = new ResizeObserver(() => {
+      if (debounce) window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => {
+        raf = requestAnimationFrame(doFit);
+      }, 80);
+    });
+    ro.observe(container);
 
     return () => {
       disposed = true;
-      window.removeEventListener("resize", onResize);
+      cancelAnimationFrame(raf);
+      if (debounce) window.clearTimeout(debounce);
       ro.disconnect();
-      unsubscribe?.();
-      if (sessionId) void killSession(sessionId);
+      session?.close();
       term.dispose();
     };
   }, [sandboxId]);
 
-  return <div ref={ref} className="h-full w-full bg-background p-2" />;
+  return <div ref={containerRef} className="h-full w-full bg-background p-2" />;
 }

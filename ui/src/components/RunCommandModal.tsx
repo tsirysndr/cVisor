@@ -2,7 +2,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
-  Button,
   Input,
   Modal,
   ModalBody,
@@ -13,6 +12,7 @@ import {
 import { useAtom, useAtomValue } from "jotai";
 import { runModalOpenAtom, selectedSandboxAtom } from "../state/atoms";
 import { useRun } from "../hooks/useRun";
+import { PrimaryButton, TextButton } from "./Buttons";
 import { OutputSkeleton } from "./Skeletons";
 
 const schema = z.object({
@@ -68,6 +68,7 @@ export function RunCommandModal() {
               autoFocus
               label="Command"
               variant="bordered"
+              radius="none"
               placeholder="uname -a"
               isInvalid={!!errors.command}
               errorMessage={errors.command?.message}
@@ -78,14 +79,15 @@ export function RunCommandModal() {
               label="Timeout (ms)"
               type="number"
               variant="bordered"
+              radius="none"
               placeholder="0"
               className="w-36"
               isInvalid={!!errors.timeoutMs}
               errorMessage={errors.timeoutMs?.message}
             />
-            <Button type="submit" color="primary" isLoading={run.isPending}>
+            <PrimaryButton type="submit" isLoading={run.isPending}>
               Run
-            </Button>
+            </PrimaryButton>
           </form>
 
           {run.isPending && <OutputSkeleton />}
@@ -122,9 +124,7 @@ export function RunCommandModal() {
           )}
         </ModalBody>
         <ModalFooter>
-          <Button variant="flat" onPress={() => setOpen(false)}>
-            Close
-          </Button>
+          <TextButton onPress={() => setOpen(false)}>Close</TextButton>
         </ModalFooter>
       </ModalContent>
     </Modal>

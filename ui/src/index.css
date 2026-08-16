@@ -25,12 +25,29 @@ body {
   font-family: "Roboto Mono Variable", ui-monospace, monospace;
 }
 
-/* cmdk palette overrides its item highlight to the charm-purple accent. */
+/* cmdk palette highlights the active item with the neon-magenta accent. */
 [cmdk-item][data-selected="true"] {
-  background: rgba(125, 86, 244, 0.18);
-  color: #fafafa;
+  background: rgba(255, 42, 109, 0.16);
+  color: #f5f5ff;
+  box-shadow: inset 2px 0 0 #ff2a6d;
 }
 
 [cmdk-item] {
   cursor: pointer;
+}
+
+/* Keyboard-shortcut chips: flat neon-outlined keys (no gradients). */
+kbd.neon-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #3a2558;
+  border-radius: 4px;
+  background: #190d2e;
+  color: #05d9e8;
+  font-size: 11px;
+  line-height: 1;
+  box-shadow: 0 0 6px rgba(5, 217, 232, 0.25);
 }
