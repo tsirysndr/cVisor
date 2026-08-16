@@ -1,0 +1,23 @@
+[package]
+name = "cvisor"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "cVisor SDK: a portable GraphQL client for the daemon (any OS) plus a Linux-only in-process native sandbox."
+repository = "https://github.com/butter-dot-dev/cVisor"
+
+# Standalone workspace so this SDK crate is NOT pulled into the parent cVisor
+# Cargo workspace (crates/* + xtask); mirrors ui/src-tauri. Keeps it from
+# disturbing the FFI cross-builds.
+[workspace]
+
+[dependencies]
+ureq = { version = "2", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+# The native in-process sandbox wraps the internal runtime and is Linux-only.
+# On macOS/Windows this dependency is absent and only the GraphQL client builds.
+[target.'cfg(target_os = "linux")'.dependencies]
+cvisor-core = { path = "../../crates/cvisor-core" }

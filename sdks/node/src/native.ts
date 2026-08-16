@@ -2,10 +2,6 @@ import { arch, platform } from "os";
 import { familySync, MUSL } from "detect-libc";
 import { External } from "./napi";
 
-if (platform() !== "linux") {
-  throw new Error("cVisor only supports Linux");
-}
-
 /** FFI contract: typed interface for the native module loaded via require(). */
 export interface NativeModule {
   createSandbox(): External<"Sandbox">;
@@ -88,5 +84,25 @@ export interface NativeModule {
   sessionKill(session: External<"Session">): void;
 }
 
-const libc = familySync() === MUSL ? "musl" : "gnu";
-export const native: NativeModule = require(`@cvisor/linux-${arch()}-${libc}`);
+// The native napi module (libcvisor.node) is Linux-only, so loading it is
+// deferred until the FFI `Sandbox` is actually used. Merely importing the
+// package — e.g. to use the pure-fetch GraphQLClient / RemoteSandbox — must not
+// require it, so it works on macOS. `native` is a lazy proxy that loads (and
+// enforces the Linux-only check) on first access.
+function loadNative(): NativeModule {
+  if (platform() !== "linux") {
+    throw new Error(
+      "the local FFI sandbox is Linux-only; use the GraphQL client (GraphQLClient / RemoteSandbox) on this platform",
+    );
+  }
+  const libc = familySync() === MUSL ? "musl" : "gnu";
+  return require(`@cvisor/linux-${arch()}-${libc}`);
+}
+
+let loadedNative: NativeModule | undefined;
+export const native: NativeModule = new Proxy({} as NativeModule, {
+  get(_target, prop) {
+    loadedNative ??= loadNative();
+    return (loadedNative as unknown as Record<PropertyKey, unknown>)[prop];
+  },
+});

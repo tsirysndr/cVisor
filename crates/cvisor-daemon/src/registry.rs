@@ -94,6 +94,11 @@ struct SessionEntry {
 pub struct Registry {
     sandboxes: Mutex<HashMap<String, SandboxState>>,
     sessions: Mutex<HashMap<String, SessionEntry>>,
+    // SQLite persistence (present in the daemon). Registry methods are sync and
+    // run on spawn_blocking threads, so they drive async store ops via the
+    // runtime handle's block_on (safe off a non-worker thread).
+    store: Option<Arc<cvisor_core::store::Store>>,
+    handle: Option<tokio::runtime::Handle>,
 }
 
 fn short_id() -> String {
@@ -107,7 +112,70 @@ impl Registry {
         Arc::new(Registry {
             sandboxes: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
+            store: None,
+            handle: None,
         })
+    }
+
+    /// Build a registry backed by the SQLite store, preloaded with the persisted
+    /// sandboxes so they survive a daemon restart.
+    pub fn with_store(
+        store: Arc<cvisor_core::store::Store>,
+        handle: tokio::runtime::Handle,
+        persisted: Vec<cvisor_core::store::PersistedSandbox>,
+    ) -> Arc<Registry> {
+        let mut map = HashMap::new();
+        for p in persisted {
+            map.insert(
+                p.id.clone(),
+                SandboxState {
+                    id: p.id,
+                    name: p.name,
+                    uid: p.uid,
+                    allow_network: p.allow_network,
+                    allow_listen: p.allow_listen,
+                    env: p.env,
+                    limits: p.limits,
+                },
+            );
+        }
+        Arc::new(Registry {
+            sandboxes: Mutex::new(map),
+            sessions: Mutex::new(HashMap::new()),
+            store: Some(store),
+            handle: Some(handle),
+        })
+    }
+
+    /// Write a sandbox through to the store on the shared runtime (fire-and-forget
+    /// for durability; the in-memory map is the source of truth for live reads).
+    /// Using `spawn` (not `block_on`) is safe from any thread — including the
+    /// spawn_blocking threads these sync methods run on.
+    fn persist(&self, st: &SandboxState) {
+        if let (Some(store), Some(h)) = (&self.store, &self.handle) {
+            let p = cvisor_core::store::PersistedSandbox {
+                id: st.id.clone(),
+                name: st.name.clone(),
+                uid: st.uid,
+                allow_network: st.allow_network,
+                allow_listen: st.allow_listen,
+                env: st.env.clone(),
+                limits: st.limits.clone(),
+            };
+            let store = store.clone();
+            h.spawn(async move {
+                let _ = store.upsert_sandbox(&p).await;
+            });
+        }
+    }
+
+    fn unpersist(&self, id: &str) {
+        if let (Some(store), Some(h)) = (&self.store, &self.handle) {
+            let (store, id) = (store.clone(), id.to_string());
+            h.spawn(async move {
+                let _ = store.delete_sandbox(&id).await;
+            });
+        }
     }
 
     /// Create a sandbox. `name` empty → a random docker-style name; a name that
@@ -146,8 +214,42 @@ impl Registry {
             limits: Limits::default(),
         };
         let info = st.info();
+        self.persist(&st);
         map.insert(id, st);
         info
+    }
+
+    /// Filter (substring on name/id) + paginate the live sandboxes from the
+    /// in-memory map; returns the page and the total count. `limit < 0` = all.
+    /// The store keeps an FTS5 index for durability/restart; live reads use the
+    /// map for read-after-write consistency without blocking on async I/O.
+    pub fn search_sandboxes(
+        &self,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> (Vec<SandboxInfo>, i64) {
+        let all = self.list_sandboxes();
+        let total = all.len() as i64;
+        let filtered: Vec<SandboxInfo> = if query.trim().is_empty() {
+            all
+        } else {
+            let ql = query.to_lowercase();
+            all.into_iter()
+                .filter(|s| s.name.to_lowercase().contains(&ql) || s.id.contains(&ql))
+                .collect()
+        };
+        let off = offset.max(0) as usize;
+        let items = if limit < 0 {
+            filtered.into_iter().skip(off).collect()
+        } else {
+            filtered
+                .into_iter()
+                .skip(off)
+                .take(limit.max(0) as usize)
+                .collect()
+        };
+        (items, total)
     }
 
     pub fn list_sandboxes(&self) -> Vec<SandboxInfo> {
@@ -181,6 +283,7 @@ impl Registry {
         if let Some(st) = self.sandboxes.lock().unwrap().remove(&id) {
             cleanup_overlay(&st.uid);
         }
+        self.unpersist(&id);
         Ok(())
     }
 
@@ -213,7 +316,9 @@ impl Registry {
                 st.env.push((k.clone(), v.clone()));
             }
         }
-        Ok(st.info())
+        let info = st.info();
+        self.persist(st);
+        Ok(info)
     }
 
     /// Resolve (uid, ExecOpts) for a run. `r` empty → a fresh ephemeral sandbox
@@ -352,6 +457,7 @@ impl Registry {
     /// the snapshot id.
     pub fn snapshot(&self, r: &str, id: &str) -> Result<String> {
         let uid = self.uid_of(r)?;
+        let source = self.resolve(r).ok();
         let id = if id.is_empty() {
             short_id()
         } else {
@@ -359,6 +465,12 @@ impl Registry {
         };
         cvisor_core::snapshot::snapshot(uid, &id)
             .map_err(|e| Error(format!("snapshot failed: {e}")))?;
+        if let (Some(store), Some(h)) = (&self.store, &self.handle) {
+            let (store, sid, src) = (store.clone(), id.clone(), source.clone());
+            h.spawn(async move {
+                let _ = store.record_snapshot(&sid, src.as_deref(), 0).await;
+            });
+        }
         Ok(id)
     }
 
@@ -406,7 +518,15 @@ impl Registry {
     }
 
     pub fn delete_snapshot(&self, id: &str) -> Result<bool> {
-        cvisor_core::snapshot::delete(id).map_err(|e| Error(format!("delete snapshot failed: {e}")))
+        let existed = cvisor_core::snapshot::delete(id)
+            .map_err(|e| Error(format!("delete snapshot failed: {e}")))?;
+        if let (Some(store), Some(h)) = (&self.store, &self.handle) {
+            let (store, id) = (store.clone(), id.to_string());
+            h.spawn(async move {
+                let _ = store.delete_snapshot(&id).await;
+            });
+        }
+        Ok(existed)
     }
 
     pub fn cache_save(

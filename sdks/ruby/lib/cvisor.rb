@@ -7,6 +7,9 @@
 require "fiddle"
 require "fiddle/import"
 
+require_relative "cvisor/graphql"
+require_relative "cvisor/remote"
+
 module Cvisor
   # Low-level binding to libcvisor via Fiddle.
   module Native
@@ -22,39 +25,56 @@ module Cvisor
       ].find { |p| File.exist?(p) } || File.join(here, "libcvisor-#{arch}.so")
     end
 
-    dlload library_path
+    # The libcvisor .so is Linux-only, so it is loaded lazily the first time an
+    # FFI Sandbox is constructed — not at `require "cvisor"` time. This lets the
+    # pure-net/http Cvisor::GraphQL / Cvisor::RemoteSandbox be used on any
+    # platform (macOS included) without the native library.
+    @loaded = false
 
-    extern "void* cvisor_sandbox_new(void)"
-    extern "void cvisor_sandbox_free(void*)"
-    extern "void cvisor_sandbox_set_log_level(void*, int)"
-    extern "void cvisor_sandbox_set_allow_network(void*, int)"
-    extern "void cvisor_sandbox_set_allow_listen(void*, int)"
-    extern "void cvisor_sandbox_set_env(void*, const char*, const char*)"
-    extern "void cvisor_sandbox_set_limits(void*, unsigned long long, unsigned long long, unsigned int)"
-    extern "int cvisor_sandbox_write_file(void*, const char*, const char*, size_t)"
-    extern "void* cvisor_sandbox_read_file(void*, const char*, void*)"
-    extern "void* cvisor_run(void*, const char*)"
-    extern "void* cvisor_run_timeout(void*, const char*, unsigned long long)"
-    extern "void cvisor_output_free(void*)"
-    extern "int cvisor_output_exit_code(void*)"
-    extern "void* cvisor_output_stdout(void*, void*)"
-    extern "void* cvisor_output_stderr(void*, void*)"
-    extern "void cvisor_bytes_free(void*, size_t)"
+    def self.ensure_loaded!
+      return if @loaded
 
-    extern "int cvisor_sandbox_copy_into(void*, const char*, const char*)"
-    extern "int cvisor_sandbox_copy_out(void*, const char*, const char*)"
-    extern "int cvisor_cache_save(void*, const char*, const char*, const char*, const char*)"
-    extern "int cvisor_cache_restore(void*, const char*, const char*, const char*, const char*)"
+      unless RbConfig::CONFIG["host_os"] =~ /linux/
+        raise "the local FFI Sandbox is Linux-only; use the GraphQL client " \
+              "(Cvisor::GraphQL / Cvisor::RemoteSandbox) on this platform"
+      end
 
-    extern "void* cvisor_session_start(void*, const char*, int)"
-    extern "void* cvisor_session_read_stdout(void*, void*)"
-    extern "void* cvisor_session_read_stderr(void*, void*)"
-    extern "long cvisor_session_write_stdin(void*, const char*, size_t)"
-    extern "void cvisor_session_resize(void*, unsigned short, unsigned short)"
-    extern "int cvisor_session_try_wait(void*, void*)"
-    extern "int cvisor_session_wait(void*)"
-    extern "void cvisor_session_kill(void*)"
-    extern "void cvisor_session_free(void*)"
+      dlload library_path
+
+      extern "void* cvisor_sandbox_new(void)"
+      extern "void cvisor_sandbox_free(void*)"
+      extern "void cvisor_sandbox_set_log_level(void*, int)"
+      extern "void cvisor_sandbox_set_allow_network(void*, int)"
+      extern "void cvisor_sandbox_set_allow_listen(void*, int)"
+      extern "void cvisor_sandbox_set_env(void*, const char*, const char*)"
+      extern "void cvisor_sandbox_set_limits(void*, unsigned long long, unsigned long long, unsigned int)"
+      extern "int cvisor_sandbox_write_file(void*, const char*, const char*, size_t)"
+      extern "void* cvisor_sandbox_read_file(void*, const char*, void*)"
+      extern "void* cvisor_run(void*, const char*)"
+      extern "void* cvisor_run_timeout(void*, const char*, unsigned long long)"
+      extern "void cvisor_output_free(void*)"
+      extern "int cvisor_output_exit_code(void*)"
+      extern "void* cvisor_output_stdout(void*, void*)"
+      extern "void* cvisor_output_stderr(void*, void*)"
+      extern "void cvisor_bytes_free(void*, size_t)"
+
+      extern "int cvisor_sandbox_copy_into(void*, const char*, const char*)"
+      extern "int cvisor_sandbox_copy_out(void*, const char*, const char*)"
+      extern "int cvisor_cache_save(void*, const char*, const char*, const char*, const char*)"
+      extern "int cvisor_cache_restore(void*, const char*, const char*, const char*, const char*)"
+
+      extern "void* cvisor_session_start(void*, const char*, int)"
+      extern "void* cvisor_session_read_stdout(void*, void*)"
+      extern "void* cvisor_session_read_stderr(void*, void*)"
+      extern "long cvisor_session_write_stdin(void*, const char*, size_t)"
+      extern "void cvisor_session_resize(void*, unsigned short, unsigned short)"
+      extern "int cvisor_session_try_wait(void*, void*)"
+      extern "int cvisor_session_wait(void*)"
+      extern "void cvisor_session_kill(void*)"
+      extern "void cvisor_session_free(void*)"
+
+      @loaded = true
+    end
   end
 
   # Drain a length-prefixed byte buffer from a native accessor and free it.
@@ -89,6 +109,7 @@ module Cvisor
 
   class Sandbox
     def initialize
+      Native.ensure_loaded!
       @ptr = Native.cvisor_sandbox_new
       raise "failed to create sandbox" if @ptr.null?
     end

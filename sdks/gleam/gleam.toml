@@ -14,6 +14,10 @@ gleam = ">= 1.0.0"
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 # The NIF-backed runtime. Published on Hex as `cvisor`; a path dep in the monorepo.
 cvisor = { path = "../erlang" }
+# Optional GraphQL client (pure HTTP + JSON; runs on any platform).
+gleam_http = ">= 4.0.0 and < 5.0.0"
+gleam_httpc = ">= 4.0.0 and < 5.0.0"
+gleam_json = ">= 2.0.0 and < 4.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

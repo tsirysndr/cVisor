@@ -18,7 +18,8 @@ s3 = ["cvisor-core/s3"]
 # hosts the crate builds to a stub `cvisord` that reports the platform, so the
 # workspace still checks — keeping the heavy async deps off non-Linux builds.
 [target.'cfg(target_os = "linux")'.dependencies]
-cvisor-core = { path = "../cvisor-core" }
+# The daemon always persists state, so it always enables cvisor-core's sqlx store.
+cvisor-core = { path = "../cvisor-core", features = ["sqlx"] }
 cvisor-proto = { path = "../cvisor-proto" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 tokio-stream = "0.1"

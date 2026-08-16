@@ -185,13 +185,26 @@ impl Query {
         }
     }
 
-    /// All live sandboxes.
-    async fn sandboxes(&self, ctx: &Context<'_>) -> Vec<Sandbox> {
-        reg(ctx)
-            .list_sandboxes()
-            .into_iter()
-            .map(Sandbox::from)
-            .collect()
+    /// Sandboxes, optionally substring-filtered and paginated. `limit`
+    /// null/absent returns all; `offset` skips from the front.
+    async fn sandboxes(
+        &self,
+        ctx: &Context<'_>,
+        search: Option<String>,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> Vec<Sandbox> {
+        let (items, _total) = reg(ctx).search_sandboxes(
+            &search.unwrap_or_default(),
+            limit.map(i64::from).unwrap_or(-1),
+            offset.map(i64::from).unwrap_or(0),
+        );
+        items.into_iter().map(Sandbox::from).collect()
+    }
+
+    /// Total number of sandboxes (for pagination/count badges).
+    async fn sandbox_count(&self, ctx: &Context<'_>) -> i32 {
+        reg(ctx).search_sandboxes("", -1, 0).1 as i32
     }
 
     /// Read a file from a sandbox; the returned string is base64.

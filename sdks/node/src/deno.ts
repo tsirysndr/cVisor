@@ -15,12 +15,20 @@ import {
 
 export type { Output, RunOptions, Limits } from "./output";
 export type { Shell, ShellOptions, StreamOptions } from "./session";
+export { GraphQLClient } from "./graphql";
+export { RemoteSandbox } from "./remote";
+export type { RemoteSandboxInfo, RemoteRunResult, RemoteLimits, ConfigureOptions } from "./remote";
 
 // This package compiles without Deno's type definitions; the entry only ever
 // executes under Deno, where the global is present.
 declare const Deno: any;
 
-const lib = Deno.dlopen(libraryPath(), {
+// The libcvisor .so is Linux-only, so loading it is deferred until a Sandbox
+// (the FFI API) is actually constructed. Merely importing this module — e.g. to
+// use the pure-fetch GraphQLClient / RemoteSandbox — must not dlopen, so it
+// works on macOS. `lib.symbols` dlopens on first access.
+function loadLib() {
+  return Deno.dlopen(libraryPath(), {
   cvisor_sandbox_new: { parameters: [], result: "pointer" },
   cvisor_sandbox_free: { parameters: ["pointer"], result: "void" },
   cvisor_sandbox_set_log_level: {
@@ -103,7 +111,16 @@ const lib = Deno.dlopen(libraryPath(), {
   },
   cvisor_session_kill: { parameters: ["pointer"], result: "void" },
   cvisor_session_free: { parameters: ["pointer"], result: "void" },
-});
+  });
+}
+
+let loadedLib: ReturnType<typeof loadLib> | undefined;
+const lib = {
+  get symbols() {
+    loadedLib ??= loadLib();
+    return loadedLib.symbols;
+  },
+};
 
 /** Bind a Deno.dlopen session pointer to the runtime-agnostic SessionNative. */
 function denoSession(sess: Pointer): SessionNative {

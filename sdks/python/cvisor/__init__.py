@@ -26,7 +26,18 @@ from ctypes import (
     POINTER,
 )
 
-__all__ = ["Sandbox", "Output", "Session", "load_library"]
+from .graphql import GraphQLClient, GraphQLError
+from .remote import RemoteSandbox
+
+__all__ = [
+    "Sandbox",
+    "Output",
+    "Session",
+    "load_library",
+    "GraphQLClient",
+    "GraphQLError",
+    "RemoteSandbox",
+]
 
 
 def _default_library_path() -> str:
@@ -232,6 +243,11 @@ class Session:
 
 class Sandbox:
     def __init__(self) -> None:
+        if platform.system() != "Linux":
+            raise RuntimeError(
+                "the local FFI Sandbox is Linux-only; use the GraphQL client "
+                "(cvisor.RemoteSandbox / cvisor.GraphQLClient) on this platform"
+            )
         self._lib = _lib()
         self._ptr = self._lib.cvisor_sandbox_new()
         if not self._ptr:

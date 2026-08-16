@@ -13,10 +13,18 @@ cVisor ships one **native runtime** and several thin language SDKs that wrap it.
 | Elixir  | pipe-friendly builder over the Erlang `cvisor` NIF | `elixir/`            |
 | Gleam   | pipe-friendly builder over the Erlang `cvisor` NIF | `gleam/`             |
 | Clojure | Java FFM (`java.lang.foreign`) over `libcvisor.so` | `clojure/`           |
+| Go      | daemon GraphQL (any OS) + cgo `libcvisor` (Linux)  | `go/`                |
+| Rust    | daemon GraphQL (any OS) + `cvisor-core` (Linux)    | `rust/`              |
 
 The Elixir (`cvisor_ex`) and Gleam (`gleam_cvisor`) SDKs both run on the BEAM
 and reuse the Erlang SDK's NIF runtime (a path dependency on `erlang/`), adding
 an idiomatic immutable builder you compose with the pipe operator `|>`.
+
+The Go (`github.com/tsirysndr/cvisor-go`) and Rust (`cvisor`) SDKs are
+**daemon-first**: their primary API is a portable client for the daemon's GraphQL
+HTTP endpoint (works on macOS with no native library), with the in-process native
+runtime available only on Linux (Go via cgo over `libcvisor`, Rust via a direct
+`cvisor-core` dependency). See `go/README.md` and `rust/README.md`.
 
 Node, Bun, and Deno all install the same `cvisor` npm package: its `exports`
 map picks the napi entry under Node and the FFI entries under Bun (`"bun"`

@@ -15,8 +15,16 @@ import {
 
 export type { Output, RunOptions, Limits } from "./output";
 export type { Shell, ShellOptions, StreamOptions } from "./session";
+export { GraphQLClient } from "./graphql";
+export { RemoteSandbox } from "./remote";
+export type { RemoteSandboxInfo, RemoteRunResult, RemoteLimits, ConfigureOptions } from "./remote";
 
-const { symbols } = dlopen(libraryPath(), {
+// The libcvisor .so is Linux-only, so loading it is deferred until a Sandbox
+// (the FFI API) is actually constructed. Merely importing this module — e.g. to
+// use the pure-fetch GraphQLClient / RemoteSandbox — must not dlopen, so it
+// works on macOS. `symbols` is a lazy proxy that dlopens on first access.
+function loadSymbols() {
+  return dlopen(libraryPath(), {
   cvisor_sandbox_new: { args: [], returns: FFIType.ptr },
   cvisor_sandbox_free: { args: [FFIType.ptr], returns: FFIType.void },
   cvisor_sandbox_set_log_level: {
@@ -105,6 +113,16 @@ const { symbols } = dlopen(libraryPath(), {
   },
   cvisor_session_kill: { args: [FFIType.ptr], returns: FFIType.void },
   cvisor_session_free: { args: [FFIType.ptr], returns: FFIType.void },
+  }).symbols;
+}
+
+type Symbols = ReturnType<typeof loadSymbols>;
+let loadedSymbols: Symbols | undefined;
+const symbols: Symbols = new Proxy({} as Symbols, {
+  get(_target, prop) {
+    loadedSymbols ??= loadSymbols();
+    return (loadedSymbols as Record<PropertyKey, unknown>)[prop];
+  },
 });
 
 /** A NUL-terminated C string pointer for an FFI cstring arg. */

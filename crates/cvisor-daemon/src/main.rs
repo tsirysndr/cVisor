@@ -74,7 +74,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("bad --http-addr: {e}"))?;
 
     let auth = auth::Auth::resolve();
-    let reg = registry::Registry::new();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
 
     // Electric-blue banner. Honor NO_COLOR (https://no-color.org).
     let color = std::env::var_os("NO_COLOR").is_none();
@@ -138,6 +140,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     );
 
+    // Open the SQLite store and load persisted sandboxes so they survive a
+    // restart (path from CVISOR_DB, default /tmp/.cvisor/cvisor.db).
+    let db_path =
+        std::env::var("CVISOR_DB").unwrap_or_else(|_| "/tmp/.cvisor/cvisor.db".to_string());
+    if let Some(parent) = std::path::Path::new(&db_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    type Opened = (
+        std::sync::Arc<cvisor_core::store::Store>,
+        Vec<cvisor_core::store::PersistedSandbox>,
+    );
+    let opened: Result<Opened, Box<dyn std::error::Error>> = rt.block_on(async {
+        let store = std::sync::Arc::new(cvisor_core::store::Store::open(&db_path).await?);
+        let persisted = store.list_sandboxes(-1, 0).await?;
+        Ok((store, persisted))
+    });
+    let reg = match opened {
+        Ok((store, persisted)) => {
+            eprintln!(
+                "  {}  {db_path} ({} sandboxes)",
+                paint(ELECTRIC, "db       "),
+                persisted.len()
+            );
+            registry::Registry::with_store(store, rt.handle().clone(), persisted)
+        }
+        Err(e) => {
+            eprintln!(
+                "  {}  {}",
+                paint(ELECTRIC, "db       "),
+                paint(DIM, &format!("disabled ({e})"))
+            );
+            registry::Registry::new()
+        }
+    };
+
     // GraphQL/actix on its own runtime thread; gRPC/tonic on the main tokio one.
     let http = std::thread::spawn({
         let reg = reg.clone();
@@ -145,9 +182,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move || server::run_http(http_addr, reg, auth)
     });
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
     let grpc_result = rt.block_on(server::run_grpc(grpc_addr, reg, auth));
 
     match http.join() {
