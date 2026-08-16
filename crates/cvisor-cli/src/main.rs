@@ -49,8 +49,8 @@ mod imp {
     use std::time::Duration;
 
     use cvisor_core::{
-        cache, copy_into, copy_out_of, exec_argv, generate_uid, run_argv, spawn_session,
-        uid_from_name, ExecOpts, Format, LogBuffer, LogLevel, PtyMode,
+        cache, copy_into, copy_out_of, exec_argv, generate_uid, interactive_shell, run_argv,
+        spawn_session, uid_from_name, ExecOpts, Format, LogBuffer, LogLevel, PtyMode,
     };
 
     const USAGE: &str = "\

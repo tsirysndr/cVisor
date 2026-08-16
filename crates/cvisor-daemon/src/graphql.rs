@@ -505,7 +505,8 @@ impl Mutation {
     async fn kill_session(&self, ctx: &Context<'_>, id: String) -> bool {
         let reg = reg(ctx);
         let existed = reg.session(&id).is_some();
-        reg.end_session(&id);
+        // kill + thread joins are blocking; keep them off the async workers.
+        let _ = spawn_blocking(move || reg.end_session(&id)).await;
         existed
     }
 

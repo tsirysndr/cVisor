@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use cvisor_core::cgroup::Limits;
 use cvisor_core::{
-    cache, cleanup_overlay, copy_into, copy_out_of, execute_with, generate_uid, read_file,
-    shell_argv, spawn_session, write_file, ExecOpts, Format, LogBuffer, LogLevel, PtyMode, Session,
+    cache, cleanup_overlay, copy_into, copy_out_of, execute_with, generate_uid, interactive_shell,
+    read_file, shell_argv, spawn_session, write_file, ExecOpts, Format, LogBuffer, LogLevel,
+    PtyMode, Session,
 };
 
 use crate::names::random_name;
@@ -392,7 +393,7 @@ impl Registry {
         let (uid, opts, ephemeral) = self.exec_target(r, 0, Overrides::default())?;
         let (argv, mode) = if pty {
             (
-                vec!["/bin/sh".to_string(), "-i".to_string()],
+                vec![interactive_shell(), "-i".to_string()],
                 PtyMode::Buffered,
             )
         } else if command.is_empty() {

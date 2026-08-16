@@ -33,8 +33,8 @@ pub mod supervisor;
 
 #[cfg(target_os = "linux")]
 pub use setup::{
-    cleanup_overlay, exec_argv, execute, execute_with, run_argv, shell_argv, spawn_session,
-    ExecOpts, PtyMode, Session,
+    cleanup_overlay, exec_argv, execute, execute_with, interactive_shell, run_argv, shell_argv,
+    spawn_session, ExecOpts, PtyMode, Session,
 };
 
 pub use archive::Format;

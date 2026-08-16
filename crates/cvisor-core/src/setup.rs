@@ -96,6 +96,18 @@ pub fn shell_argv(cmd: &str) -> Vec<String> {
     vec!["/bin/sh".into(), "-c".into(), cmd.into()]
 }
 
+/// The shell to launch for an interactive PTY session: `bash` if present on the
+/// host, otherwise `/bin/sh`. cow paths read through to the host, so a host
+/// `bash` is exactly what the guest would exec.
+pub fn interactive_shell() -> String {
+    for candidate in ["/bin/bash", "/usr/bin/bash"] {
+        if std::path::Path::new(candidate).exists() {
+            return candidate.to_string();
+        }
+    }
+    "/bin/sh".to_string()
+}
+
 /// `argv` that execs a user command with its argument boundaries preserved:
 /// `/bin/sh -c 'exec "$@"' cvisor <args...>`. PATH resolution is done by the
 /// guest shell, so `cvisor -- uname -a` behaves like a login shell would.
@@ -217,6 +229,13 @@ fn fork_guest(
                     libc::setpgid(0, 0);
                 }
             }
+            // Drop every inherited fd above stderr: other sessions' notify fds,
+            // PTY masters, daemon sockets. Essential for correctness, not just
+            // hygiene — the supervisor locates this child's listener by scanning
+            // /proc/<pid>/fd for a seccomp-notify fd, and an inherited notify fd
+            // from a concurrently running session would be found first, attaching
+            // the new supervisor to the wrong guest.
+            libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 0u32);
         }
         match filter::install() {
             Ok(fd) => std::mem::forget(fd),

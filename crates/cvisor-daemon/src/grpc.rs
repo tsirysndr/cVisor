@@ -214,7 +214,8 @@ impl Cvisor for Grpc {
                     break;
                 }
             }
-            reg.end_session(&sid);
+            // kill + thread joins are blocking; keep them off the async workers.
+            let _ = tokio::task::spawn_blocking(move || reg.end_session(&sid)).await;
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
@@ -270,7 +271,6 @@ impl Cvisor for Grpc {
             };
 
             let mut tick = tokio::time::interval(Duration::from_millis(20));
-            let mut client_open = true;
             loop {
                 tokio::select! {
                     _ = tick.tick() => {
@@ -289,7 +289,7 @@ impl Cvisor for Grpc {
                             break;
                         }
                     }
-                    msg = inbound.message(), if client_open => {
+                    msg = inbound.message() => {
                         match msg {
                             Ok(Some(pb::ShellInput { kind: Some(In::Stdin(bytes)) })) => {
                                 let _ = session.write_stdin(&bytes);
@@ -299,15 +299,17 @@ impl Cvisor for Grpc {
                             }
                             Ok(Some(_)) => {}
                             Ok(None) | Err(_) => {
-                                // Client closed its half; stop reading and let the
-                                // session finish, draining remaining output.
-                                client_open = false;
+                                // Client gone (terminal closed / disconnect). An
+                                // interactive shell would otherwise outlive it
+                                // forever, so end the session now.
+                                break;
                             }
                         }
                     }
                 }
             }
-            reg.end_session(&sid);
+            // kill + thread joins are blocking; keep them off the async workers.
+            let _ = tokio::task::spawn_blocking(move || reg.end_session(&sid)).await;
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
