@@ -1,6 +1,6 @@
 {
   "name": "@cvisor/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "cVisor CLI — a lightweight in-process Linux sandbox for untrusted and LLM-generated code",
   "license": "MIT",
   "repository": {
@@ -22,9 +22,9 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "@cvisor/cli-linux-x64": "0.1.0",
-    "@cvisor/cli-linux-arm64": "0.1.0",
-    "@cvisor/cli-darwin-arm64": "0.1.0"
+    "@cvisor/cli-linux-x64": "0.1.1",
+    "@cvisor/cli-linux-arm64": "0.1.1",
+    "@cvisor/cli-darwin-arm64": "0.1.1"
   },
   "keywords": [
     "cvisor",
