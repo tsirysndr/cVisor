@@ -16,7 +16,7 @@ if (!version || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
 }
 
 const root = dirname(fileURLToPath(import.meta.url));
-const packages = ["cli", "linux-x64", "linux-arm64", "darwin-arm64"];
+const packages = ["cli", "daemon", "linux-x64", "linux-arm64", "darwin-arm64"];
 
 for (const dir of packages) {
   const path = join(root, dir, "package.json");

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Publish @cvisor/cli and its per-host binary packages to npm, from a machine
-# logged in with `npm login`. Run it after the release workflow has attached the
-# tarballs to the GitHub Release for the tag:
+# Publish @cvisor/cli, @cvisor/daemon and their per-host binary packages to npm,
+# from a machine logged in with `npm login`. Run it after the release workflow
+# has attached the tarballs to the GitHub Release for the tag:
 #
 #   ./npm/publish.sh v0.2.0            # download the release assets, then publish
 #   ./npm/publish.sh v0.2.0 --dry-run  # stage and pack, publish nothing
@@ -38,7 +38,7 @@ node npm/version.mjs "$version"
 
 # The platform packages go first: the launcher pins their exact version, so
 # publishing it earlier would leave a window where it cannot resolve.
-for dir in linux-x64 linux-arm64 darwin-arm64 cli; do
+for dir in linux-x64 linux-arm64 darwin-arm64 cli daemon; do
   name="$(node -p "require('./npm/$dir/package.json').name")"
   if npm view "$name@$version" version >/dev/null 2>&1; then
     echo "==> $name@$version is already on npm, skipping"

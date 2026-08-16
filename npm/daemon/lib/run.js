@@ -2,12 +2,12 @@
 
 const { spawnSync } = require("node:child_process");
 
-// One prebuilt package per supported host; npm installs only the matching one
-// (they carry `os`/`cpu` fields and are optional dependencies).
+// The daemon is Linux-only, so only the Linux platform packages carry it. They
+// are shared with @cvisor/cli (each ships both binaries) and installed as
+// optional dependencies, so npm picks the one matching the host.
 const PACKAGES = {
   "linux-x64": "@cvisor/cli-linux-x64",
   "linux-arm64": "@cvisor/cli-linux-arm64",
-  "darwin-arm64": "@cvisor/cli-darwin-arm64",
 };
 
 function binaryPath(name) {
@@ -15,14 +15,14 @@ function binaryPath(name) {
   const pkg = PACKAGES[host];
   if (!pkg) {
     throw new Error(
-      `@cvisor/cli ships no binaries for ${host} (supported: ${Object.keys(PACKAGES).join(", ")})`
+      `cvisord runs on Linux only — no binary for ${host} (supported: ${Object.keys(PACKAGES).join(", ")})`
     );
   }
   try {
     return require.resolve(`${pkg}/bin/${name}`);
   } catch {
     throw new Error(
-      `${pkg} is not installed — reinstall without --no-optional: npm install -g @cvisor/cli`
+      `${pkg} is not installed — reinstall without --no-optional: npm install -g @cvisor/daemon`
     );
   }
 }

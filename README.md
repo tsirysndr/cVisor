@@ -102,12 +102,12 @@ filter, which Docker's default profiles block.
 The cVisor runtime ships wrapped in a Typescript SDK, installed via npm.
 
 ```bash
-npm install cvisor
+npm install @cvisor/sdk
 ```
 
 Example usage:
 ```typescript
-import { Sandbox } from "cvisor";
+import { Sandbox } from "@cvisor/sdk";
 
 const sb = new Sandbox();
 const output = sb.runCmd("echo 'Hello, world!'");
@@ -177,11 +177,13 @@ all formats and the S3 backend.
 ### Install
 
 ```bash
-npm install -g @cvisor/cli
+npm install -g @cvisor/cli        # the cvisor CLI
+npm install -g @cvisor/daemon     # cvisord, the daemon (Linux only)
+
+npx @cvisor/cli -- echo hello     # or run the CLI without installing
 ```
 
-npm picks the prebuilt package for your host — `cvisor` everywhere, plus the
-`cvisord` daemon on Linux:
+npm picks the prebuilt package for your host:
 
 | Host                | Package                    | Binaries            |
 | ------------------- | -------------------------- | ------------------- |

@@ -1,16 +1,16 @@
 {
-  "name": "@cvisor/cli",
+  "name": "@cvisor/daemon",
   "version": "0.1.1",
-  "description": "cVisor CLI — a lightweight in-process Linux sandbox for untrusted and LLM-generated code",
+  "description": "cvisord — the cVisor daemon, serving the sandbox runtime over gRPC + GraphQL",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tsirysndr/cVisor.git",
-    "directory": "npm/cli"
+    "directory": "npm/daemon"
   },
   "homepage": "https://github.com/tsirysndr/cVisor",
   "bin": {
-    "cvisor": "bin/cvisor.js"
+    "cvisord": "bin/cvisord.js"
   },
   "files": [
     "bin/",
@@ -22,15 +22,15 @@
   },
   "optionalDependencies": {
     "@cvisor/cli-linux-x64": "0.1.1",
-    "@cvisor/cli-linux-arm64": "0.1.1",
-    "@cvisor/cli-darwin-arm64": "0.1.1"
+    "@cvisor/cli-linux-arm64": "0.1.1"
   },
   "keywords": [
     "cvisor",
+    "cvisord",
     "sandbox",
     "seccomp",
     "isolation",
     "gvisor",
-    "cli"
+    "daemon"
   ]
 }
