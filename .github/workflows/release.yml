@@ -3,6 +3,13 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Re-run a release for a tag that already exists (e.g. after a failed job).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and release (e.g. v0.1.0)"
+        required: true
+        type: string
 
 # Needed for softprops/action-gh-release to create the GitHub Release.
 permissions:
@@ -10,10 +17,12 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # On workflow_dispatch there is no tag ref, so build the requested tag.
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
-    name: build cvisor (${{ matrix.arch }})
+    name: build cvisor (linux ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -27,6 +36,8 @@ jobs:
             target: aarch64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -73,9 +84,54 @@ jobs:
             cvisor-linux-${{ matrix.arch }}.sha256
           if-no-files-found: error
 
+  build-macos:
+    name: build cvisor (macos aarch64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-macos-aarch64
+
+      # The CLI embeds the web UI (ui/dist) via rust-embed, so build it first —
+      # otherwise the binary ships the placeholder page.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Build web UI
+        run: cd ui && bun install && bun run build
+
+      # macos-latest is Apple silicon, so this is a native build. The C deps
+      # (zstd, and ring via the s3 backend's TLS) build against the runner's
+      # Xcode toolchain. On macOS the CLI has no in-process sandbox: it drives a
+      # bsdkrun microVM running cvisord, which the macOS-only deps provide.
+      - name: Build cvisor (all features)
+        run: cargo build -p cvisor-cli --bin cvisor --target aarch64-apple-darwin --release --features zstd,s3
+
+      - name: Stage artifact
+        run: |
+          bin="cvisor-darwin-aarch64"
+          install -m 755 target/aarch64-apple-darwin/release/cvisor "$bin"
+          shasum -a 256 "$bin" > "$bin.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cvisor-darwin-aarch64
+          path: |
+            cvisor-darwin-aarch64
+            cvisor-darwin-aarch64.sha256
+          if-no-files-found: error
+
   release:
     name: publish GitHub Release
-    needs: build
+    needs: [build, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -86,6 +142,7 @@ jobs:
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: dist/*
           generate_release_notes: true
           fail_on_unmatched_files: true
