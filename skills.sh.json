@@ -1,0 +1,11 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "cVisor",
+      "description": "Skills for cVisor — an in-process Linux sandbox that virtualizes syscalls from userspace (seccomp user-notifier), with a CLI, a cvisord daemon (gRPC + GraphQL), and language SDKs.",
+      "skills": ["cvisor-cli"]
+    }
+  ]
+}
