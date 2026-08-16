@@ -10,19 +10,37 @@
 # cVisor installs its own seccomp filter, so run with the default seccomp
 # profile disabled (--security-opt seccomp=unconfined).
 
-# Build the web UI first (the CLI embeds ui/dist via rust-embed).
+# Build the web UI first (the CLI embeds ui/dist via rust-embed). Dependencies
+# install in their own layer so editing ui/src doesn't re-run bun install.
 FROM oven/bun:alpine AS web
 WORKDIR /src/ui
+COPY ui/package.json ui/bun.lock ./
+RUN bun install
 COPY ui/ .
-RUN bun install && bun run build
+RUN bun run build
 
-FROM rust:bookworm AS build
 # perl builds ring's C (s3 TLS); protobuf-compiler gives build.rs a protoc
 # (a glibc host, so the vendored one would also work — this is just explicit).
+FROM rust:bookworm AS chef
 RUN apt-get update && apt-get install -y --no-install-recommends \
       perl pkg-config protobuf-compiler \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install cargo-chef --locked
 WORKDIR /src
+
+# The recipe is a manifest-only digest of the workspace: it changes when
+# dependencies change, not when sources do.
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+# Compile every dependency against stub sources; this layer is reused across
+# source-only changes. Feature flags must match the real build below or the
+# cached artifacts don't apply.
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --release -p cvisor-cli --features zstd,s3 --recipe-path recipe.json \
+ && cargo chef cook --release -p cvisor-daemon --features zstd,s3 --recipe-path recipe.json
 COPY . .
 # Overlay the built web assets so the embedded UI isn't the placeholder.
 COPY --from=web /src/ui/dist ui/dist
