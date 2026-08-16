@@ -17,9 +17,12 @@ filesystem (a copy-on-write overlay over the host) and network/resource controls
 without a VM or a separate service. It's meant for untrusted or LLM-generated
 code: a Docker/gVisor alternative with millisecond sandbox lifecycle.
 
-The **local sandbox is Linux-only**. From any host (macOS included) use
-**remote mode** (`--remote`) to drive a `cvisord` daemon over gRPC, or `cvisor ui`
-to open the web UI against a daemon's GraphQL endpoint.
+The **in-process sandbox needs a Linux kernel**. On **Linux** it runs directly.
+On **macOS** the same commands work transparently: the CLI provisions a reusable
+`bsdkrun` microVM named `cvisor-sandbox` (from the cVisor image, running
+`cvisord` inside) and drives it over gRPC — see "macOS" below. From any host you
+can also use **remote mode** (`--remote`) to drive a specific `cvisord` daemon,
+or `cvisor ui` to open the web UI against a daemon's GraphQL endpoint.
 
 **For the full flag list of every command, read `references/cli-reference.md`.**
 
@@ -93,6 +96,31 @@ Web UI:
   (`--token` or `CVISOR_TOKEN`). The daemon (`cvisord`) serves gRPC on
   `:50051` and GraphQL on `:8080` by default.
 
+## macOS
+
+The in-process sandbox needs a Linux kernel, so on macOS `cvisor` transparently
+runs inside a **single reusable `bsdkrun` microVM** named `cvisor-sandbox`:
+
+- On the first `cvisor` / `cvisor -- <cmd>`, it boots the microVM from the cVisor
+  image (`ghcr.io/tsirysndr/cvisor:ubuntu-latest` by default) with `cvisord`
+  inside, generates and caches a bearer token under `~/.cvisor/`, forwards the
+  daemon's gRPC (`:50051`) and GraphQL (`:8080`) to the host, and streams each
+  provisioning step (image pull → boot → readiness → `cvisor doctor`).
+- Later runs **reuse** the same microVM (starting it if it was stopped), so
+  they connect instantly. All sandboxes share this one VM.
+- Requires the **`bsdkrun` CLI** installed (`brew install tsirysndr/tap/bsdkrun`).
+  `cvisor doctor` on macOS checks bsdkrun, VM support, and the microVM.
+- Supported on macOS: `cvisor` (shell), `cvisor -- <cmd>`, an optional sandbox
+  ref, `--timeout`, plus `cvisor ui` and explicit `--remote`. (Local-only
+  subcommands — `cp`, `cache`, `snapshot` — are not yet wired through the macOS
+  wrapper; reach the daemon directly for those.)
+
+Overrides (env): `CVISOR_SANDBOX_TAG` (`ubuntu` | `trixie` | `alpine`),
+`CVISOR_SANDBOX_IMAGE` (a full OCI ref, e.g.
+`ghcr.io/tsirysndr/cvisor:trixie-1.2.3`), `CVISOR_SANDBOX_CPUS`,
+`CVISOR_SANDBOX_MEM`, `CVISOR_SANDBOX_DISK` (a size like `8G`, a path, or `off`).
+Set `CVISOR_REMOTE` to bypass the microVM and target an existing daemon.
+
 ## Examples
 
 ```sh
@@ -130,4 +158,11 @@ cvisor --remote 127.0.0.1:50051 --token "$CVISOR_TOKEN"        # remote shell
 
 # Serve the web UI against a daemon
 cvisor ui --daemon http://localhost:8080 --token "$CVISOR_TOKEN"
+
+# macOS: same commands; the first run provisions the cvisor-sandbox microVM
+cvisor doctor                                  # checks bsdkrun + VM support
+cvisor -- uname -a                             # boots the VM (first run), then runs
+cvisor                                         # sandboxed shell in the microVM
+CVISOR_SANDBOX_TAG=alpine cvisor -- cat /etc/os-release   # override the image
+CVISOR_SANDBOX_IMAGE=ghcr.io/tsirysndr/cvisor:trixie-latest cvisor -- echo hi
 ```

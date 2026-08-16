@@ -6,6 +6,8 @@
 //!   cvisor --no-network -- ...  disable outbound networking
 //!   cvisor --timeout 5000 -- .. SIGKILL the guest after N ms
 
+#[cfg(target_os = "macos")]
+mod macos;
 mod remote;
 mod ui;
 
@@ -25,7 +27,13 @@ fn main() {
     {
         std::process::exit(imp::run());
     }
-    #[cfg(not(target_os = "linux"))]
+    // On macOS the in-process sandbox can't run (it needs a Linux kernel), so
+    // transparently provision a bsdkrun microVM and drive cvisord inside it.
+    #[cfg(target_os = "macos")]
+    {
+        std::process::exit(macos::run(&argv[1..]));
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         eprintln!(
             "cvisor: the local sandbox runs on Linux only; use --remote <addr> to reach a daemon"

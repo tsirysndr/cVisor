@@ -30,3 +30,12 @@ libc = { workspace = true }
 rust-embed = "8"
 tiny_http = "0.12"
 open = "5"
+
+# macOS: the local in-process sandbox is Linux-only, so on macOS the CLI
+# transparently boots a reusable bsdkrun microVM (named `cvisor-sandbox`) from
+# the cVisor image, runs `cvisord` inside it, and drives the CLI against that
+# daemon. bsdkrun-sdk isn't published, so it's pulled by git; being target-gated
+# to macOS, the Linux CI never builds or fetches it (the committed Cargo.lock
+# pins it), so `cargo build` on Linux is unaffected.
+[target.'cfg(target_os = "macos")'.dependencies]
+bsdkrun-sdk = { git = "https://github.com/tsirysndr/bsdkrun" }

@@ -156,11 +156,58 @@ OPTIONS:
 
 ---
 
+## macOS (bsdkrun microVM)
+
+The in-process sandbox needs a Linux kernel, so on macOS `cvisor` runs the same
+commands inside a **single reusable `bsdkrun` microVM** named `cvisor-sandbox`.
+No new syntax: `cvisor`, `cvisor -- <cmd>`, an optional sandbox ref, and
+`--timeout` all work; the CLI provisions the VM (once) and drives `cvisord`
+inside it over gRPC.
+
+Requires the **`bsdkrun` CLI** (`brew install tsirysndr/tap/bsdkrun`).
+
+First run (streamed step by step):
+1. Boots the cVisor image (`ghcr.io/tsirysndr/cvisor:ubuntu-latest` by default)
+   as a microVM named `cvisor-sandbox`, with `cvisord` as its process.
+2. Generates a bearer token, cached at `~/.cvisor/sandbox-token` for reuse.
+3. Forwards the daemon's gRPC (`:50051`) and GraphQL (`:8080`) to the host, and
+   optionally attaches a persistent disk (`~/.cvisor/cvisor-sandbox.disk.raw`).
+4. Waits until the daemon serves a GraphQL `health` request, then verifies the
+   in-VM sandbox with `cvisor doctor`.
+5. Connects and runs the requested command / shell.
+
+Later runs reuse the VM (starting it if stopped) and connect instantly. All
+sandboxes share this one VM.
+
+`cvisor doctor` on macOS checks bsdkrun, libkrun/VM support, and the microVM's
+state (rather than the Linux kernel prerequisites).
+
+Not yet wired through the macOS wrapper: `cp`, `cache`, and the snapshot
+subcommands (they run against the daemon; reach it directly for now). To bypass
+the microVM entirely and target an existing daemon, set `CVISOR_REMOTE` (or pass
+`--remote`).
+
+macOS env overrides:
+- `CVISOR_SANDBOX_TAG` — image tag: `ubuntu` (default), `trixie`, `alpine`.
+- `CVISOR_SANDBOX_IMAGE` — a full OCI ref, overriding the tag. Examples:
+  `ghcr.io/tsirysndr/cvisor:ubuntu-latest`,
+  `ghcr.io/tsirysndr/cvisor:trixie-1.2.3`,
+  `registry.example.com/team/cvisor:custom`.
+- `CVISOR_SANDBOX_CPUS` — vCPUs (default `2`).
+- `CVISOR_SANDBOX_MEM` — RAM in MiB (default `2048`).
+- `CVISOR_SANDBOX_DISK` — extra disk: a size (`8G`, the default), an explicit
+  path, or `off`/`none` to disable.
+
+To change the image of an existing VM, remove it first: `bsdkrun rm -f cvisor-sandbox`.
+
+---
+
 ## Environment variables
 
 - `CVISOR_REMOTE` — daemon address; a non-empty value selects remote mode. `--remote` overrides it.
 - `CVISOR_TOKEN` — bearer token for remote mode and `cvisor ui`. `--token` overrides it.
 - `CVISOR_DAEMON` — default daemon GraphQL URL for `cvisor ui`. `--daemon` overrides it.
+- macOS only: `CVISOR_SANDBOX_TAG`, `CVISOR_SANDBOX_IMAGE`, `CVISOR_SANDBOX_CPUS`, `CVISOR_SANDBOX_MEM`, `CVISOR_SANDBOX_DISK` (see the macOS section).
 
 ## Exit codes
 
