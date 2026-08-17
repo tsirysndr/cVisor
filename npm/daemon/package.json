@@ -1,6 +1,6 @@
 {
   "name": "@cvisor/daemon",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "cvisord — the cVisor daemon, serving the sandbox runtime over gRPC + GraphQL",
   "license": "MIT",
   "repository": {
@@ -21,8 +21,8 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "@cvisor/cli-linux-x64": "0.1.1",
-    "@cvisor/cli-linux-arm64": "0.1.1"
+    "@cvisor/cli-linux-x64": "0.1.2",
+    "@cvisor/cli-linux-arm64": "0.1.2"
   },
   "keywords": [
     "cvisor",
