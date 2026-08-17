@@ -80,6 +80,7 @@ pub fn format_status(ns_pid: NsTgid, ns_ppid: NsTgid) -> Vec<u8> {
     format!(
         "Name:\tcvisor-guest\n\
          State:\tS (sleeping)\n\
+         Tgid:\t{ns_pid}\n\
          Pid:\t{ns_pid}\n\
          PPid:\t{ns_ppid}\n\
          Uid:\t0\t0\t0\t0\n\

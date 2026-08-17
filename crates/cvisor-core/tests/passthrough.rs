@@ -484,11 +484,25 @@ fn ps_lists_sandbox_processes() {
 }
 
 #[test]
+fn proc_listing_shows_only_sandbox_pids() {
+    // The synthesized /proc must list only the sandbox's own processes —
+    // never the host's (the supervisor, other sessions, kernel threads). The
+    // shell + grep account for every listed pid; anything beyond a handful
+    // means the host tree leaked in via thread discovery.
+    let (out, _err) = run("ls /proc | grep -c '^[0-9]'");
+    let n: usize = out.trim().parse().unwrap_or(usize::MAX);
+    assert!(
+        n >= 1 && n <= 4,
+        "expected only sandbox pids, got {n}: {out:?}"
+    );
+}
+
+#[test]
 fn proc_files_for_ps_and_top() {
     // The files procps gates on / reads: version (the mount check), uptime,
     // loadavg, meminfo, and the global stat with btime.
     let (out, _err) = run(
-        "grep -c 'Linux version' /proc/version;          grep -c . /proc/uptime;          grep -c '^0.00' /proc/loadavg;          grep -c MemTotal /proc/meminfo;          grep -c btime /proc/stat;          grep -c '^1 (' /proc/1/stat",
+        "grep -c 'Linux version' /proc/version;          grep -c . /proc/uptime;          grep -c '^0.00' /proc/loadavg;          grep -c MemTotal /proc/meminfo;          grep -c btime /proc/stat;          grep -c '^[0-9]* (' /proc/self/stat",
     );
     assert_eq!(out, "1\n1\n1\n1\n1\n1\n");
 }

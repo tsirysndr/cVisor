@@ -99,10 +99,11 @@ impl Threads {
     }
 
     /// Look up a thread, discovering it (and any missing ancestors) from `/proc`
-    /// on a miss.
+    /// on a miss. The tid comes from a seccomp notification, so it is known to
+    /// be a sandbox task — orphan adoption applies.
     pub fn get_or_sync(&mut self, tid: AbsTid, proc: &dyn ProcInfo) -> Option<&Thread> {
         if !self.map.contains_key(&tid) {
-            let _ = self.ensure_registered(tid, proc);
+            let _ = self.ensure_registered(tid, proc, true);
         }
         self.map.get(&tid)
     }
@@ -246,30 +247,46 @@ impl Threads {
     pub fn sync_new_threads(&mut self, proc: &dyn ProcInfo) {
         for tid in proc.list_tids() {
             if !self.map.contains_key(&tid) {
-                let _ = self.ensure_registered(tid, proc);
+                // These tids come from a full /proc scan, not from a seccomp
+                // notification, so they include every process on the host (the
+                // supervisor, other sessions' guests, kernel threads). No
+                // orphan adoption: only tids whose ancestor chain reaches a
+                // known sandbox thread may register, or the whole host process
+                // tree leaks into the sandbox's /proc view.
+                let _ = self.ensure_registered(tid, proc, false);
             }
         }
     }
 
     /// Register `tid`, registering ancestors first. Recursion stops at an
-    /// already-known thread (e.g. the init thread).
-    fn ensure_registered(&mut self, tid: AbsTid, proc: &dyn ProcInfo) -> Result<(), ThreadError> {
+    /// already-known thread (e.g. the init thread). With `adopt`, a tid whose
+    /// ancestry can't be established is adopted into the sandbox — valid only
+    /// when the tid is known to carry our seccomp filter (it notified).
+    fn ensure_registered(
+        &mut self,
+        tid: AbsTid,
+        proc: &dyn ProcInfo,
+        adopt: bool,
+    ) -> Result<(), ThreadError> {
         if self.map.contains_key(&tid) {
             return Ok(());
         }
         let status = proc.status(tid).ok_or(ThreadError::NotFound)?;
         let parent_tid = status.ptid;
         let parent_known = self.map.contains_key(&parent_tid)
-            || (parent_tid > 1 && self.ensure_registered(parent_tid, proc).is_ok());
+            || (parent_tid > 1 && self.ensure_registered(parent_tid, proc, false).is_ok());
         if !parent_known {
-            // Only processes carrying our seccomp filter can notify, so this
-            // tid IS a sandbox task — its parent just exited before the tid's
-            // first syscall and the host reaper adopted it. Refusing it would
-            // hand the orphan ESRCH on every syscall forever (shared-library
-            // loads fail with "No such process", bash job control breaks).
-            // Adopt it: as a thread of its group if the leader is known, else
-            // under the init guest with a fresh table (its inherited real fds
-            // keep working untracked via reply_continue).
+            if !adopt {
+                return Err(ThreadError::NotInSandbox);
+            }
+            // The notifying tid carries our seccomp filter, so it IS a sandbox
+            // task — its parent just exited before the tid's first syscall and
+            // the host reaper adopted it. Refusing it would hand the orphan
+            // ESRCH on every syscall forever (shared-library loads fail with
+            // "No such process", bash job control breaks). Adopt it: as a
+            // thread of its group if the leader is known, else under the init
+            // guest with a fresh table (its inherited real fds keep working
+            // untracked via reply_continue).
             if status.tgid != tid && self.map.contains_key(&status.tgid) {
                 return self.register_child(
                     status.tgid,
