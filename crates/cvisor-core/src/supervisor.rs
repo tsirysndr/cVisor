@@ -891,8 +891,10 @@ impl Supervisor {
     }
 
     /// Synthesize the directory listing for a `/proc` directory: `/proc` lists
-    /// `self` + each visible pid; `/proc/<N>` and `/proc/self` list `status`.
+    /// `self`, each visible pid, and the synthesized top-level files;
+    /// `/proc/<N>` and `/proc/self` list the per-pid files.
     fn proc_dirents(state: &mut VirtState, dir_path: &str) -> crate::virt::fs::dirent::DirEntryMap {
+        use crate::virt::fs::backend::procfile::{PID_FILES, TOP_FILES};
         use crate::virt::fs::dirent::DirEntryMap;
         const DT_DIR: u8 = 4;
         const DT_REG: u8 = 8;
@@ -902,13 +904,38 @@ impl Supervisor {
         map.insert("..", DT_DIR, false);
         if dir_path == "/proc" {
             map.insert("self", DT_LNK, false);
+            for name in TOP_FILES {
+                map.insert(name, DT_REG, false);
+            }
             for tgid in state.threads.ns_tgids() {
                 map.insert(&tgid.to_string(), DT_DIR, false);
             }
         } else {
-            map.insert("status", DT_REG, false);
+            for name in PID_FILES {
+                map.insert(name, DT_REG, false);
+            }
         }
         map
+    }
+
+    /// The guest-visible `stat` line for the process with absolute tgid `abs`:
+    /// the real `/proc/<abs>/stat` with pid/ppid/pgrp/session translated into
+    /// the sandbox namespace, or a synthetic line if it can't be read.
+    fn pid_stat(state: &mut VirtState, abs: i32, ns_pid: i32, ns_ppid: i32) -> Vec<u8> {
+        use crate::virt::fs::backend::procfile::{rewrite_pid_stat, synth_pid_stat};
+        let raw = std::fs::read_to_string(format!("/proc/{abs}/stat")).unwrap_or_default();
+        // Map the real pgrp/session leaders into the namespace when tracked.
+        let mapped = raw.rfind(')').and_then(|close| {
+            let fields: Vec<&str> = raw[close + 1..].split_ascii_whitespace().collect();
+            let map = |s: &&str| -> Option<i32> {
+                let abs_id: i32 = s.parse().ok()?;
+                state.threads.ns_pid(abs_id)
+            };
+            let pgrp = fields.get(1).and_then(map);
+            let sid = fields.get(2).and_then(map);
+            rewrite_pid_stat(&raw, ns_pid, ns_ppid, pgrp, sid)
+        });
+        mapped.unwrap_or_else(|| synth_pid_stat(ns_pid, ns_ppid))
     }
 
     /// Resolve a normalized `/proc` path into `(content, is_dir)` from the
@@ -920,8 +947,35 @@ impl Supervisor {
         normalized: &str,
     ) -> SysResult<(Vec<u8>, bool)> {
         use crate::error::{Errno, SysError};
-        use crate::virt::fs::backend::procfile::{format_status, parse_proc_path, ProcTarget};
+        use crate::virt::fs::backend::procfile::{
+            format_loadavg, format_meminfo, format_stat_global, format_status, format_uptime,
+            format_version, parse_proc_path, ProcTarget,
+        };
         let target = parse_proc_path(normalized)?;
+        // (abs tgid, ns pid, ns ppid) for the caller's own process.
+        let self_ids = |state: &mut VirtState| -> SysResult<(i32, i32, i32)> {
+            let abs = state
+                .threads
+                .get(caller)
+                .map(|t| t.tgid)
+                .ok_or(SysError(Errno::SRCH))?;
+            let pid = state.threads.ns_pid(caller).ok_or(SysError(Errno::SRCH))?;
+            let ppid = state.threads.ns_ppid(caller).ok_or(SysError(Errno::SRCH))?;
+            Ok((abs, pid, ppid))
+        };
+        // (abs tgid, ns ppid) for a namespaced pid.
+        let pid_ids = |state: &mut VirtState, n: i32| -> SysResult<(i32, i32)> {
+            let abs = state
+                .threads
+                .abs_tgid_for_ns(n)
+                .ok_or(SysError(Errno::NOENT))?;
+            let ppid = state.threads.ns_ppid(abs).ok_or(SysError(Errno::NOENT))?;
+            Ok((abs, ppid))
+        };
+        let cmdline = |abs: i32| {
+            std::fs::read(format!("/proc/{abs}/cmdline"))
+                .unwrap_or_else(|_| b"cvisor-guest\0".to_vec())
+        };
         Ok(match target {
             ProcTarget::DirProc | ProcTarget::DirSelf => (Vec::new(), true),
             ProcTarget::DirPid(n) => {
@@ -932,17 +986,65 @@ impl Supervisor {
                 (Vec::new(), true)
             }
             ProcTarget::SelfStatus => {
-                let pid = state.threads.ns_pid(caller).ok_or(SysError(Errno::SRCH))?;
-                let ppid = state.threads.ns_ppid(caller).ok_or(SysError(Errno::SRCH))?;
+                let (_, pid, ppid) = self_ids(state)?;
                 (format_status(pid, ppid), false)
             }
             ProcTarget::PidStatus(n) => {
-                let abs = state
-                    .threads
-                    .abs_tgid_for_ns(n)
-                    .ok_or(SysError(Errno::NOENT))?;
-                let ppid = state.threads.ns_ppid(abs).ok_or(SysError(Errno::NOENT))?;
+                let (_, ppid) = pid_ids(state, n)?;
                 (format_status(n, ppid), false)
+            }
+            ProcTarget::SelfStat => {
+                let (abs, pid, ppid) = self_ids(state)?;
+                (Self::pid_stat(state, abs, pid, ppid), false)
+            }
+            ProcTarget::PidStat(n) => {
+                let (abs, ppid) = pid_ids(state, n)?;
+                (Self::pid_stat(state, abs, n, ppid), false)
+            }
+            ProcTarget::SelfCmdline => {
+                let (abs, _, _) = self_ids(state)?;
+                (cmdline(abs), false)
+            }
+            ProcTarget::PidCmdline(n) => {
+                let (abs, _) = pid_ids(state, n)?;
+                (cmdline(abs), false)
+            }
+            ProcTarget::Version => {
+                let release = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+                    .unwrap_or_else(|_| "6.0.0".into());
+                (format_version(release.trim()), false)
+            }
+            ProcTarget::Uptime => (format_uptime(self.start.elapsed().as_secs_f64()), false),
+            ProcTarget::Loadavg => {
+                let count = state.threads.count();
+                (format_loadavg(count, count as i32 + 1), false)
+            }
+            ProcTarget::Meminfo => {
+                // SAFETY: buf is a live sysinfo struct; sysinfo fills it.
+                let mut buf: libc::sysinfo = unsafe { std::mem::zeroed() };
+                // SAFETY: as above.
+                let rc = unsafe { libc::sysinfo(&mut buf) };
+                let kb = |v: u64| v.saturating_mul(buf.mem_unit as u64) / 1024;
+                if rc != 0 {
+                    return Err(SysError(Errno::IO));
+                }
+                (
+                    format_meminfo(
+                        kb(buf.totalram as u64),
+                        kb(buf.freeram as u64),
+                        kb(buf.totalswap as u64),
+                        kb(buf.freeswap as u64),
+                    ),
+                    false,
+                )
+            }
+            ProcTarget::StatGlobal => {
+                let uptime = self.start.elapsed().as_secs();
+                let btime = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs().saturating_sub(uptime))
+                    .unwrap_or(0);
+                (format_stat_global(btime, state.threads.count()), false)
             }
         })
     }

@@ -472,6 +472,28 @@ fn killed_pty_session_tears_down() {
 }
 
 #[test]
+fn ps_lists_sandbox_processes() {
+    // busybox ps walks /proc/<N>/stat; the synthesized pid dirs and stat files
+    // must be complete enough for it to print the shell's row.
+    let (out, err) = run("ps");
+    assert!(out.contains("PID"), "ps header missing: {out:?} {err:?}");
+    assert!(
+        out.contains("sh") || out.contains("ps"),
+        "no process rows: {out:?}"
+    );
+}
+
+#[test]
+fn proc_files_for_ps_and_top() {
+    // The files procps gates on / reads: version (the mount check), uptime,
+    // loadavg, meminfo, and the global stat with btime.
+    let (out, _err) = run(
+        "grep -c 'Linux version' /proc/version;          grep -c . /proc/uptime;          grep -c '^0.00' /proc/loadavg;          grep -c MemTotal /proc/meminfo;          grep -c btime /proc/stat;          grep -c '^1 (' /proc/1/stat",
+    );
+    assert_eq!(out, "1\n1\n1\n1\n1\n1\n");
+}
+
+#[test]
 fn concurrent_sessions_get_distinct_notify_fds() {
     use cvisor_core::{spawn_session, PtyMode};
     use std::time::Duration;
