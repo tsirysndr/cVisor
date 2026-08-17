@@ -492,7 +492,7 @@ fn proc_listing_shows_only_sandbox_pids() {
     let (out, _err) = run("ls /proc | grep -c '^[0-9]'");
     let n: usize = out.trim().parse().unwrap_or(usize::MAX);
     assert!(
-        n >= 1 && n <= 4,
+        (1..=4).contains(&n),
         "expected only sandbox pids, got {n}: {out:?}"
     );
 }
