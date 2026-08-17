@@ -140,6 +140,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     );
 
+    // With CVISOR_DATA_DISK set (the macOS microVM attaches a raw disk and
+    // points this at it), back /tmp/.cvisor with that block device. The VM's
+    // root is virtiofs, whose per-write host round-trips make small writes —
+    // exactly what overlay-bound downloads produce — an order of magnitude
+    // slower than virtio-blk.
+    if let Ok(dev) = std::env::var("CVISOR_DATA_DISK") {
+        if let Err(e) = mount_data_disk(&dev) {
+            eprintln!("  {}", paint(AMBER, &format!("data disk {dev}: {e}")));
+        }
+    }
+
     // Open the SQLite store and load persisted sandboxes so they survive a
     // restart (path from CVISOR_DB, default /tmp/.cvisor/cvisor.db).
     let db_path =
@@ -190,4 +201,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => return Err("http server thread panicked".into()),
     }
     grpc_result
+}
+
+/// Mount the `CVISOR_DATA_DISK` block device (ext4) at `/tmp/.cvisor`,
+/// creating the filesystem on first use. Idempotent: a no-op when it is
+/// already mounted there; only ever formats a device with no ext4 superblock.
+#[cfg(target_os = "linux")]
+fn mount_data_disk(dev: &str) -> Result<(), String> {
+    use std::io::{Read, Seek, SeekFrom};
+    const DIR: &str = "/tmp/.cvisor";
+    if !std::path::Path::new(dev).exists() {
+        return Err("device not present".into());
+    }
+    let mounted = std::fs::read_to_string("/proc/mounts")
+        .unwrap_or_default()
+        .lines()
+        .any(|l| {
+            let mut it = l.split_whitespace();
+            it.next() == Some(dev) && it.next() == Some(DIR)
+        });
+    if mounted {
+        return Ok(());
+    }
+    // ext4 superblock magic 0xEF53 at offset 1024 + 56.
+    let has_fs = (|| -> std::io::Result<bool> {
+        let mut f = std::fs::File::open(dev)?;
+        f.seek(SeekFrom::Start(1024 + 56))?;
+        let mut magic = [0u8; 2];
+        f.read_exact(&mut magic)?;
+        Ok(u16::from_le_bytes(magic) == 0xEF53)
+    })()
+    .map_err(|e| format!("probe: {e}"))?;
+    if !has_fs {
+        let st = std::process::Command::new("mkfs.ext4")
+            .args(["-q", "-F", dev])
+            .status()
+            .map_err(|e| format!("mkfs.ext4: {e}"))?;
+        if !st.success() {
+            return Err(format!("mkfs.ext4 exited {st}"));
+        }
+    }
+    std::fs::create_dir_all(DIR).map_err(|e| format!("mkdir: {e}"))?;
+    let dev_c = std::ffi::CString::new(dev).map_err(|_| "bad device path".to_string())?;
+    let dir_c = std::ffi::CString::new(DIR).unwrap();
+    let fs_c = std::ffi::CString::new("ext4").unwrap();
+    // SAFETY: mount(2) with valid NUL-terminated strings and no data arg.
+    let rc = unsafe {
+        libc::mount(
+            dev_c.as_ptr(),
+            dir_c.as_ptr(),
+            fs_c.as_ptr(),
+            0,
+            std::ptr::null(),
+        )
+    };
+    if rc != 0 {
+        return Err(format!("mount: {}", std::io::Error::last_os_error()));
+    }
+    Ok(())
 }

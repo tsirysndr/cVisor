@@ -161,7 +161,12 @@ fn create_vm(addr: &str) -> Result<(String, String), i32> {
         .log_level(1);
     if let Some(disk) = ensure_disk() {
         eprintln!("    disk:    {disk}");
-        builder = builder.attach_disk(disk.as_str());
+        builder = builder
+            .attach_disk(disk.as_str())
+            // cvisord formats/mounts the attached disk at /tmp/.cvisor so
+            // sandbox overlays live on virtio-blk instead of the virtiofs
+            // root, whose per-write host round-trips crawl on small writes.
+            .env("CVISOR_DATA_DISK", "/dev/vda");
     }
 
     step("booting microVM (first run pulls the image — this can take a minute)…");
@@ -242,6 +247,7 @@ done
 export CVISOR_TOKEN='{token}'
 export CVISOR_GRPC_ADDR='0.0.0.0:{GRPC_PORT}'
 export CVISOR_HTTP_ADDR='0.0.0.0:{HTTP_PORT}'
+[ -b /dev/vda ] && export CVISOR_DATA_DISK=/dev/vda
 mkdir -p /var/log
 if command -v setsid >/dev/null 2>&1; then
     ( setsid cvisord >/var/log/cvisord.log 2>&1 </dev/null & )

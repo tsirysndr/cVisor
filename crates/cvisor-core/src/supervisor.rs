@@ -31,7 +31,12 @@ use crate::virt::proc::Threads;
 use crate::virt::tombstones::Tombstones;
 
 const MAX_INFLIGHT: usize = 8;
-const IO_CHUNK: usize = 4096;
+/// Max bytes moved per intercepted read/write. Each guest I/O syscall costs a
+/// full notify round-trip plus a process_vm copy, so a small cap multiplies
+/// syscalls: at 4 KiB a 16 KiB curl write took 4 round-trips (and 4 slow
+/// virtiofs writes). 128 KiB covers common userspace buffer sizes in one trip;
+/// the transient per-request buffer stays modest (MAX_INFLIGHT × 128 KiB).
+const IO_CHUNK: usize = 128 * 1024;
 const MAX_IOV: usize = 16;
 /// One poll slice for an interruptible blocking recv: the max time the
 /// supervisor waits before re-checking that the guest is still blocked on the
