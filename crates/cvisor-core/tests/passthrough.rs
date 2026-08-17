@@ -472,6 +472,59 @@ fn killed_pty_session_tears_down() {
 }
 
 #[test]
+fn concurrent_sessions_get_distinct_notify_fds() {
+    use cvisor_core::{spawn_session, PtyMode};
+    use std::time::Duration;
+    // With a session already live, this process holds its notify fd — which a
+    // freshly forked guest inherits until its close_range runs. The notify-fd
+    // scan must never steal that inherited fd (it would attach the new
+    // supervisor to the old guest and leave the new one blocked forever on its
+    // first syscall). Repeat to give the race a chance to fire.
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let held = spawn_session(
+        generate_uid(),
+        LogLevel::Off,
+        &["/bin/sh".to_string(), "-i".to_string()],
+        ExecOpts::default(),
+        PtyMode::Buffered,
+    )
+    .expect("held session failed");
+
+    for round in 0..10 {
+        let session = spawn_session(
+            generate_uid(),
+            LogLevel::Off,
+            &[
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo ROUND_OK".to_string(),
+            ],
+            ExecOpts::default(),
+            PtyMode::None,
+        )
+        .expect("second session failed");
+        let mut out = Vec::new();
+        for _ in 0..250 {
+            out.extend(session.read_stdout());
+            if session.try_wait().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        out.extend(session.read_stdout());
+        let text = String::from_utf8_lossy(&out);
+        assert!(
+            session.try_wait().is_some() && text.contains("ROUND_OK"),
+            "round {round}: guest wedged (stole the held session's notify fd?); out: {text:?}"
+        );
+        session.kill();
+        session.wait();
+    }
+    held.kill();
+    held.wait();
+}
+
+#[test]
 fn allow_listen_gates_fixed_port_bind() {
     // A fixed-port TCP bind is denied by default (outbound-only) and permitted
     // when allow_listen is set. `timeout` bounds the otherwise-blocking listen.

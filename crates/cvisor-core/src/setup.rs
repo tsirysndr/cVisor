@@ -772,20 +772,39 @@ fn steal_notify_fd(child_pid: i32) -> SysResult<OwnedFd> {
     Err(SysError(Errno::IO))
 }
 
-/// Scan `/proc/<pid>/fd` for the fd whose link target names the seccomp notifier.
+/// Scan `/proc/<pid>/fd` for the fd whose link target names the seccomp
+/// notifier — but only once the child's fd table is post-`close_range`.
+///
+/// Right after fork the child still holds every fd inherited from the parent,
+/// which in a multi-session host (cvisord) includes *other live sessions'*
+/// notify fds. A scan that wins the race against the child's `close_range`
+/// would steal one of those, attaching the new supervisor to the wrong guest
+/// (a second reader on that filter) and leaving the new guest's filter with no
+/// reader at all — it then blocks forever on its first syscall. After
+/// `close_range(3..)` the child's table is exactly {0, 1, 2} plus the freshly
+/// installed filter fd, so require that shape before trusting the match.
 fn find_seccomp_fd(child_pid: i32) -> Option<RawFd> {
     let dir = format!("/proc/{child_pid}/fd");
     let entries = std::fs::read_dir(&dir).ok()?;
+    let mut seccomp_fd = None;
+    let mut total = 0usize;
     for entry in entries.flatten() {
         let name = entry.file_name();
         let num: RawFd = name.to_str()?.parse().ok()?;
+        total += 1;
+        if total > 4 {
+            return None; // inherited fds not yet closed
+        }
         if let Ok(target) = std::fs::read_link(entry.path()) {
             if target.to_string_lossy().contains("seccomp") {
-                return Some(num);
+                if num < 3 || seccomp_fd.is_some() {
+                    return None; // not the post-close_range shape
+                }
+                seccomp_fd = Some(num);
             }
         }
     }
-    None
+    seccomp_fd
 }
 
 fn pidfd_open(pid: i32) -> SysResult<OwnedFd> {
