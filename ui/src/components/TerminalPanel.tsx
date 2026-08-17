@@ -162,7 +162,7 @@ export function TerminalPanel() {
 
       <div className="flex h-8 shrink-0 items-center border-b border-content3 bg-content1 pr-1">
         <IconTerminal2 size={14} className="mx-2 shrink-0 text-secondary" />
-        <div className="flex min-w-0 flex-1 items-stretch gap-px self-stretch overflow-x-auto">
+        <div className="scrollbar-none flex min-w-0 flex-1 items-stretch gap-px self-stretch overflow-x-auto">
           {tabs.map((tab) => (
             <div
               key={tab.id}

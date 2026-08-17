@@ -47,10 +47,20 @@ export interface TerminalTab {
 export const terminalTabsAtom = atom<TerminalTab[]>([]);
 export const activeTerminalTabAtom = atom<string | null>(null);
 
-// Right-docked AI agent panel: a PTY running one of the pre-installed agent
+// Right-docked AI agent panel: PTY sessions running the pre-installed agent
 // CLIs inside the selected sandbox, or (desktop only) on the host machine —
-// where the CLI can use local cvisor skills to drive sandboxes. The chosen CLI
-// and target persist.
+// where the CLI can use local cvisor skills to drive sandboxes. Each session
+// is a tab; every tab's terminal stays mounted (hidden when inactive) so an
+// ongoing agent task survives tab switches and panel show/hide. The chosen
+// CLI (for new sessions) and target persist.
+export interface AgentTab {
+  id: string;
+  cli: string;
+  host: boolean;
+  sandboxId: string | null;
+}
+export const agentTabsAtom = atom<AgentTab[]>([]);
+export const activeAgentTabAtom = atom<string | null>(null);
 export const agentPanelVisibleAtom = atomWithStorage("cvisor.agentPanel", false);
 export const agentCliAtom = atomWithStorage("cvisor.agentCli", "claude");
 export const agentTargetAtom = atomWithStorage<"sandbox" | "host">(

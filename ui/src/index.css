@@ -67,6 +67,14 @@ select:focus-visible,
   cursor: pointer;
 }
 
+/* Scrollable strips (e.g. terminal tabs) that must not show a scrollbar. */
+.scrollbar-none {
+  scrollbar-width: none; /* Firefox */
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none; /* WebKit */
+}
+
 /* Keyboard-shortcut chips: flat neon-outlined keys (no gradients). */
 kbd.neon-key {
   display: inline-flex;

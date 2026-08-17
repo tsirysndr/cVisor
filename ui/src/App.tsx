@@ -3,12 +3,7 @@ import { useAtomValue } from "jotai";
 import { useQueryClient } from "@tanstack/react-query";
 import { configAtom, setActiveConfig } from "./config";
 import { getTransport, isMac, isTauri } from "./transport";
-import {
-  agentPanelVisibleAtom,
-  sidebarVisibleAtom,
-  themeAtom,
-  viewAtom,
-} from "./state/atoms";
+import { sidebarVisibleAtom, themeAtom, viewAtom } from "./state/atoms";
 import { applyTheme } from "./theme";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { useTrayActions, useTrayStatus } from "./hooks/useTray";
@@ -73,7 +68,6 @@ function Workspace() {
   useShortcuts();
   useTrayStatus();
   const sidebarVisible = useAtomValue(sidebarVisibleAtom);
-  const agentVisible = useAtomValue(agentPanelVisibleAtom);
 
   return (
     <>
@@ -88,7 +82,8 @@ function Workspace() {
           </div>
           <TerminalPanel />
         </div>
-        {agentVisible && <AgentPanel />}
+        {/* Always mounted: hiding uses CSS so live agent sessions survive. */}
+        <AgentPanel />
       </div>
       <StatusLine />
 
