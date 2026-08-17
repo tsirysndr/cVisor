@@ -438,6 +438,40 @@ fn pty_session_runs_interactive_shell() {
 }
 
 #[test]
+fn killed_pty_session_tears_down() {
+    use cvisor_core::{spawn_session, PtyMode};
+    use std::time::Duration;
+    // Killing an idle interactive session (client disconnect, sandbox delete)
+    // must complete teardown: wait() joins the supervisor and PTY pump threads,
+    // so a blocking read left behind by the dead guest would wedge it forever.
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let session = spawn_session(
+        generate_uid(),
+        LogLevel::Off,
+        &["/bin/sh".to_string(), "-i".to_string()],
+        ExecOpts::default(),
+        PtyMode::Buffered,
+    )
+    .expect("spawn_session failed");
+
+    // A background job lands in its own process group, so a plain
+    // `kill(-leader)` would miss it — the survivor then keeps the seccomp
+    // filter and the PTY slave alive and teardown never finishes.
+    session.write_stdin(b"sleep 100 &\n").unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    session.kill();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(session.wait());
+    });
+    let code = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("session.wait() wedged after kill");
+    assert_eq!(code, 137, "expected SIGKILL exit convention");
+}
+
+#[test]
 fn allow_listen_gates_fixed_port_bind() {
     // A fixed-port TCP bind is denied by default (outbound-only) and permitted
     // when allow_listen is set. `timeout` bounds the otherwise-blocking listen.

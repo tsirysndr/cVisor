@@ -367,10 +367,7 @@ fn run_and_reap(
         std::thread::spawn(move || {
             if let Err(mpsc::RecvTimeoutError::Timeout) = done_rx.recv_timeout(timeout) {
                 timed_out.store(true, Ordering::SeqCst);
-                // SAFETY: signal the guest's process group (pgid == child_pid).
-                unsafe {
-                    libc::kill(-child_pid, libc::SIGKILL);
-                }
+                kill_guest_tree(child_pid);
             }
         })
     });
@@ -401,6 +398,60 @@ fn run_and_reap(
         exit_code_from_status(status)
     } else {
         -1
+    }
+}
+
+/// SIGKILL the guest's entire process tree. `kill(-leader)` alone misses jobs
+/// an interactive shell moved into their own process groups; such survivors
+/// keep the seccomp filter and the PTY slave alive, so the supervisor loop
+/// never sees the hangup and teardown wedges. The guest is its own session
+/// (PTY) or process-group (pipe) leader, so sweep `/proc` for tasks whose
+/// session or pgid matches and kill those too, repeating briefly to catch a
+/// racing fork.
+fn kill_guest_tree(leader: i32) {
+    // SAFETY: signal the guest's own process group (pgid == leader).
+    unsafe {
+        libc::kill(-leader, libc::SIGKILL);
+    }
+    for _ in 0..10 {
+        let mut survivors = false;
+        let Ok(entries) = std::fs::read_dir("/proc") else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|s| s.parse::<i32>().ok())
+            else {
+                continue;
+            };
+            if pid == std::process::id() as i32 {
+                continue;
+            }
+            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+                continue;
+            };
+            // Fields after the parenthesized comm: state ppid pgrp session ...
+            let Some(rest) = stat.rsplit_once(')').map(|(_, r)| r) else {
+                continue;
+            };
+            let mut fields = rest.split_whitespace();
+            let state = fields.next().unwrap_or("");
+            let pgrp: i32 = fields.nth(1).and_then(|f| f.parse().ok()).unwrap_or(0);
+            let session: i32 = fields.next().and_then(|f| f.parse().ok()).unwrap_or(0);
+            if (pgrp == leader || session == leader) && state != "Z" {
+                survivors = true;
+                // SAFETY: SIGKILL a task in the guest's session/process group.
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        }
+        if !survivors {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -639,12 +690,10 @@ impl Session {
         self.try_wait().unwrap_or(-1)
     }
 
-    /// SIGKILL the guest process group.
+    /// SIGKILL the guest's whole process tree (jobs in their own process
+    /// groups included).
     pub fn kill(&self) {
-        // SAFETY: signal the guest's own process group (pgid == child_pid).
-        unsafe {
-            libc::kill(-self.child_pid, libc::SIGKILL);
-        }
+        kill_guest_tree(self.child_pid);
     }
 }
 
