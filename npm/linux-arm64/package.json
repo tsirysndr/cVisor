@@ -1,6 +1,6 @@
 {
   "name": "@cvisor/cli-linux-arm64",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Prebuilt cvisor + cvisord binaries for Linux aarch64 (static musl)",
   "license": "MIT",
   "repository": {

@@ -51,7 +51,7 @@
 
         webNodeModules = pkgs.stdenv.mkDerivation {
           pname = "cvisor-web-node-modules";
-          version = "0.1.2";
+          version = "0.1.3";
           src = webDepsSrc;
           nativeBuildInputs = [ pkgs.bun ];
           dontConfigure = true;
@@ -84,7 +84,7 @@
 
         web = pkgs.stdenv.mkDerivation {
           pname = "cvisor-web";
-          version = "0.1.2";
+          version = "0.1.3";
           src = ./ui;
           nativeBuildInputs = [ pkgs.bun pkgs.nodejs ];
           configurePhase = ''
